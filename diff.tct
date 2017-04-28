@@ -1,0 +1,344 @@
+diff -r core/TSTEP ../Nek5000/core/TSTEP
+44,46d43
+<       COMMON /TTIME/ TTIME_STP, INIT_TIME !added by keke to determine when to load balance
+<       real TTIME_STP, INIT_TIME
+< 
+diff -r core/cmt/drive1_cmt.f ../Nek5000/core/cmt/drive1_cmt.f
+47,48c47,48
+< c        if (nid .eq. 0 .or. nid .eq. 30) then
+< c           print *, stage, nid, nelt, "compute_rhs_and_dt",
+---
+> c        if (nid .eq. 3 .or. nid .eq. 30) then
+> c              print *, stage, "compute_rhs_and_dt",
+50,51c50,51
+< c        endif
+< c        timet = dnekclock()
+---
+> c        endif 
+> c        timet = dnekclock()  
+60,61c60,61
+< c        if (nid .eq. 0 .or. nid .eq. 30) then
+< c           print *, stage, "usr_particles_solver",
+---
+> c        if (nid .eq. 3 .or. nid .eq. 30) then
+> c            print *, stage, "usr_particles_solver",
+64,65c64
+< c        timet = dnekclock()
+< 
+---
+> c        timet = dnekclock()  
+140,142d138
+<       real   xerange(2,3,lelt)
+<       common /elementrange/ xerange
+< 
+146c142
+<       real timet
+---
+>       real timet 
+148,149d143
+< c     gas_right_boundary = exp(time/2.0)
+<  
+160c154
+< c        if (nid .eq. 0) print *, stage, "1",
+---
+> c        if (nid .eq. 3) print *, stage, "1",
+163a158
+> 
+180c175
+<         
+---
+> 
+205c200
+<         timet = dnekclock()
+---
+>          timet = dnekclock()
+207c202
+< c        if (nid .eq. 3 .or. nid .eq. 30) print *,nid, nelt, "2",
+---
+> c        if (nid .eq. 3 .or. nid .eq. 30) print *, stage, "2",
+224c219
+< c        if (nid .eq. 0 .or. nid .eq. 30) print *, stage, "3",
+---
+> c        if (nid .eq. 3 .or. nid .eq. 30) print *, stage, "3",
+228d222
+< 
+248,249c242,243
+< c        if (nid .eq. 0  .or. nid .eq. 30) print *, "41",
+< c    $         dnekclock()-timet, nelt 
+---
+> c        if (nid .eq. 3 .or. nid .eq. 30) print *, "41",
+> c    $         dnekclock()-timet, nelt
+250a245,246
+> 
+> 
+256,257d251
+< c        x_left_boundary = xerange(1,1,e)
+< c        if (x_left_boundary .lt. gas_right_boundary) then
+271,276c265,270
+<             call cmtusrf(e)
+<             call compute_gradients(e) ! gradU ! ccc
+<             do eq=1,toteq
+<                call convective_cmt(e,eq)        ! convh & totalh -> res1
+<                call    viscous_cmt(e,eq) ! diffh -> half_iku_cmt -> res1 !ccc
+<                                                 !       |
+---
+>          call cmtusrf(e)
+>          call compute_gradients(e) ! gradU ! ccc
+>          do eq=1,toteq
+>             call convective_cmt(e,eq)        ! convh & totalh -> res1
+>          call    viscous_cmt(e,eq) ! diffh -> half_iku_cmt -> res1 !ccc
+>                                              !       |
+279,281c273,274
+<                call compute_forcing(e,eq)
+<             enddo
+< c        endif
+---
+>             call compute_forcing(e,eq)
+>          enddo
+284c277
+< c        if (nid .eq. 0  .or. nid .eq. 30) print *, "42",
+---
+> c        if (nid .eq. 3 .or. nid .eq. 30) print *, "42",
+286a280
+> 
+291c285
+< c        if (nid .eq. 0 .or. nid .eq. 30) print *,  "43",
+---
+> c        if (nid .eq. 3 .or. nid .eq. 30) print *,  "43",
+293a288
+> 
+302c297
+< c        if (nid .eq. 0 .or. nid .eq. 30) print *,  "44",
+---
+> c        if (nid .eq. 3 .or. nid .eq. 30) print *,  "44",
+diff -r core/cmt/driver3_cmt.f ../Nek5000/core/cmt/driver3_cmt.f
+20c20
+< c     gas_right_boundary = exp(time/2.0)
+---
+>       gas_right_boundary = exp(time/2.0)
+68c68
+<          call rzero(vx(1,1,1,e), nxyz)
+---
+>          call rzero (vx(1,1,1,e), nxyz)
+Only in ../Nek5000/core/cmt: 
+Only in core: connect2.f.noprint
+diff -r core/drive1.f ../Nek5000/core/drive1.f
+35,39d34
+<       common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
+<       integer gfirst, inoassignd, resetFindpts, pload
+< 
+<       gfirst=1
+<       inoassignd=0
+130,131d124
+<       gfirst = 0       !     for correct executaion of reinitialize call in particles code (userchk)
+< 
+181,182d173
+<       include 'PARALLEL'
+< 
+186,194c177
+<       integer modstep
+<       common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
+<       integer gfirst, inoassignd, resetFindpts, pload
+<       integer reinit_step  !added by keke
+<       integer counter !added by keke
+<       integer last_kstep !added by keke
+<       real diff_time
+<       real timet 
+< 
+---
+>       real timet
+197,201d179
+<       reinit_step=0
+<       diff_time = 0.0
+<       counter = 0
+<       last_kstep = 0
+< 
+223,231d200
+< c     Upon redistribution of elements, the following stages happen in sequence:
+< c     1) reinitialize is called
+< c     2) elements are moved to different processors to achieve load balancing based on current distribution of particles (particles have not been moved yet)
+< c     3) Fluid forces are updated in nek__multi_advance
+< c     4) CMT-bone: Particles are moved based on predefined forces
+< c     5) Particles are moved to new processors based on which element they are in.
+< c     To add support of particle movement in CMT-nek, we *must* move particles along
+< c     with the elements to different processors as part of the load balancing in step (2)
+< c     above. Then the particle locations are updated based on the new fluid force calculations done in step(3).
+238c207
+<          
+---
+> 
+265,315d233
+< 
+<          modstep = mod(kstep, 10)
+<          if (modstep .eq. 0) then
+<             resetFindpts = 1
+<             call reinitialize
+<             !call printVerify
+<          endif
+< 
+< cc        auto load balancing
+< c         if(nid .eq. 0) then
+< c         if(kstep .le. reinit_step+10) then !for the first 10 step after
+< c                                            !rebalance, pick the minimum
+< c                                            !one as the init_time
+< c            if((INIT_TIME .gt. TTIME_STP) .and. (TTIME_STP .ne. 0)) then
+< c                INIT_TIME = TTIME_STP
+< c            endif
+< c         else if(kstep .gt. reinit_step+100) then
+< c            diff_time = (TTIME_STP-INIT_TIME)/INIT_TIME
+< c               if(nid .eq. 0) then
+< c               print *, "nid:", nid, "ttime_stp:", TTIME_STP, INIT_TIME
+< c     $           ,diff_time
+< c               endif
+< c         endif
+< c         endif
+< c
+< c         call bcast(diff_time, 8)
+< c         if (diff_time .gt. 0.3) then
+< c            if (last_kstep .eq. 0) then
+< c                counter = counter + 1
+< c            else if((counter .le. 2) .and.
+< c     $                     (last_kstep .eq. kstep-1))then
+< c                counter = counter + 1
+< c            else
+< c                counter = 0
+< c            endif
+< c            last_kstep = kstep
+< c            if (counter .gt. 2) then
+< c                !print *, "into the reinit, nid:", nid, "diff_time:",
+< c     $            !diff_time
+< c                resetFindpts = 1
+< c                call reinitialize
+< c                !call printVerify
+< c                reinit_step = kstep
+< c                if(nid .eq. 0) then
+< c                   print *, "reintilize, reinti_step:", reinit_step
+< c                endif
+< c                diff_time = 0
+< c                INIT_TIME = 100
+< c                counter = 0
+< c            endif
+< c         endif
+347d264
+<       real timet
+368d284
+< 
+378a295
+> 
+393d309
+< 
+462,464c378,380
+<          if(nid .eq . 0) print *, "nek_advance",
+<      $          DNEKCLOCK()-timet
+<          timet = DNEKCLOCK()
+---
+> c        if(nid .eq . 0) print *, "nek_advance",
+> c    $          DNEKCLOCK()-timet
+> c        timet = DNEKCLOCK()
+diff -r core/drive2.f ../Nek5000/core/drive2.f
+130,131d129
+<            INIT_TIME = 100  !added by keke to store the first time step
+<                           !after rebalance
+419,420d416
+<       common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
+<       integer gfirst, inoassignd, resetFindpts, pload
+428c424
+<          IF (ISTEP.EQ.0 .or. (gfirst .eq. 0)) CALL GENCOOR (XM3,YM3,ZM3)
+---
+>          IF (ISTEP.EQ.0) CALL GENCOOR (XM3,YM3,ZM3)
+Only in core: loadbal.f
+Only in core: loadbal_noprints.f
+diff -r core/makefile.template ../Nek5000/core/makefile.template
+42c42
+< navier5.o navier6.o navier7.o navier8.o loadbal.o fast3d.o fasts.o calcz.o \
+---
+> navier5.o navier6.o navier7.o navier8.o fast3d.o fasts.o calcz.o \
+203d202
+< $(OBJDIR)/loadbal.o	:$S/loadbal.f;			$(FC) -c $(FL2) $< -o $@
+diff -r core/map2.f ../Nek5000/core/map2.f
+109a110
+> c
+111,134c112
+<  
+< c     added by keke
+<       common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
+<       integer gfirst, inoassignd, resetFindpts, pload
+< c      parameter (lr=16*ldim,li=5+6)
+<       parameter (lr=76,li=10)
+<       common  /cpartr/ rpart(lr,llpart) ! Minimal value of lr = 14*ndim+1
+<       common  /cparti/ ipart(li,llpart) ! Minimal value of lr = 14*ndim+1
+<       common  /iparti/ n,nr,ni
+< c     common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jai
+< c    >                ,nai,jr,jd,jx,jy,jz,jx1,jx2,jx3,jv0,jv1,jv2,jv3
+< c    >                ,ju0,ju1,ju2,ju3,jf0,jar,jaa,jab,jac,jad,nar,jpid
+<       common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jpid
+<      >                   ,jai,nai,    jr,jd,jx,jy,jz,jv0,ju0,jf0,jfusr
+<      >                   ,jfqs,jfun,jfiu,jtaup,jcd,jdrhodt,jre,jDuDt
+<      >                   ,jtemp,jrho,jrhop,ja,jvol,jdp,jar,jx1,jx2,jx3
+<      >                   ,jv1,jv2,jv3,ju1,ju2,ju3,nar,jvol1,jgam
+< 
+<       common /myparth/ i_fp_hndl, i_cr_hndl
+<       integer ip, e
+<       logical partl         ! This is a dummy placeholder, used in cr()
+<       nl = 0                ! No logicals exchanged
+< c     end added by keke
+< 
+---
+> c
+182,194d159
+< 
+< c     added by keke to convert ipart(je0, i) to local element id
+<       if ( gfirst .eq. 0) then
+<          ip=0
+<          do ip = 1, n
+<             e = ipart(je0, ip)
+<             ipart(je0, ip) = gllel(e) - 1  ! je0 start from 0
+<          enddo
+< c     Sort by element number 
+<           call crystal_tuple_sort(i_cr_hndl,n
+<      $              , ipart,ni,partl,nl,rpart,nr,je0,1)
+<       endif
+< 
+diff -r core/navier8.f ../Nek5000/core/navier8.f
+1726d1725
+<       common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
+1728d1726
+<       integer gfirst, inoassignd, resetFindpts, pload
+1735c1733
+<       if ((icalld.gt.0) .and. (inoassignd .gt. 0)) return
+---
+>       if (icalld.gt.0) return
+1737d1734
+<       inoassignd = 1
+1752,1753d1748
+<       common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
+<       integer gfirst, inoassignd, resetFindpts, pload
+1766d1760
+<       starttime = dnekclock()
+1807,1809c1801
+<                if(.not.ifgfdm .and. (gfirst .eq. 1)) then
+<                   gllnid(eg) = wk(2,m)  !proc map,  must still be divided
+<                endif
+---
+>                if(.not.ifgfdm)  gllnid(eg) = wk(2,m)  !proc map,  must still be divided
+1817,1818d1808
+<          endtime = dnekclock()
+<          print *, "read map file", endtime - starttime
+1828,1840c1818,1820
+<         if ( gfirst .eq. 1) then
+< c          if (nid .eq. 0) then
+< c              call assign_partitions   !(gllnid, lelt, nelgt, np)
+< !keke add, assign gllnid according to the elements load balance
+< c          endif
+<             lng = isize*neli
+<             call bcast(gllnid,lng)
+<             call assign_gllnid(gllnid,gllel,nelgt,nelgv,np) ! gllel is used as scratch
+<          else
+<             call recompute_partitions   !keke add, assign gllnid according to the elements load balance, gllnid has obtained within this function
+<             lng = isize*neli
+<             call bcast(pload,lng)
+<         endif
+---
+>         lng = isize*neli
+>         call bcast(gllnid,lng)
+>         call assign_gllnid(gllnid,gllel,nelgt,nelgv,np) ! gllel is used as scratch

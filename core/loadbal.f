@@ -170,8 +170,7 @@ c         print *, 'prefix sum, len: ', len
 c         call printi(psum, len)
 c         print *, ' i', i
           !call printi(pos, np+1)
-          if( i .lt. np) then ! this part is for the partition less than
-np
+          if(i .lt. np) then ! this part is for the partition less than np
               do k = i+2, np+1
                  pos(k) = len + 1
               enddo

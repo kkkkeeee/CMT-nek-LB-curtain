@@ -39,6 +39,7 @@ c     uniformally assign element
         enddo
       endif
 
+c     part = nelgt/np
 c      do i=1, nelgt
 c         gllnid(i) = (i-1)/nel
 c      enddo
@@ -123,6 +124,75 @@ c  50  continue
       end
 
 c--------------------------------------------------------
+c     assign to corresponding processor, limit the number of element
+c     assigned to each processor
+      subroutine ldblce_limit(psum, len, gllnid, np)
+         include "SIZE"
+         integer psum(len)
+         integer np
+         integer gllnid(len)
+
+         integer i,j, k, flag, ne
+         integer pos(np+1)  !pos(i)-pos(i+1)-1 belong to processor i-1
+         real diff, diffn, thresh
+         i=1
+         flag = 0
+         thresh=psum(len)*1.0/np*i
+         call izero(pos, np+1)
+         pos(1)=1
+         ne = 0
+         do 70 j=2, len
+            diff=abs(thresh-psum(j-1))
+            diffn=abs(thresh-psum(j))
+            if(diff .ge. diffn) then
+               !write(*,*) "i:", i, "pos(i):", pos(i)
+               ! bring in lelt
+               ne=ne+1
+               if (ne > lelt-1) then
+                   print *,i, "Number of elements",
+     $              "exceeds lelt = ", lelt
+                   pos(i+1)=j
+                   ne = 0
+                   i = i + 1
+                   thresh=psum(len)*1.0/np*i
+               else
+                   pos(i+1)=j+1
+               endif
+            else
+               pos(i+1)=j
+               !write(*,*) "i/:", i, "pos(i):", pos(i)
+               i=i+1
+               thresh=psum(len)*1.0/np*i
+               ne = 0
+            endif
+  70      continue
+c         print *, 'prefix sum, len: ', len
+c         call printi(psum, len)
+c         print *, ' i', i
+          !call printi(pos, np+1)
+          if( i .lt. np) then ! this part is for the partition less than
+np
+              do k = i+2, np+1
+                 pos(k) = len + 1
+              enddo
+          endif
+c         print *, 'printing pos'
+c         call printi(pos, np+1)
+c         do i=1, np+1  !verify loadbal
+c            print *,'pos:', i, pos(i)
+c         enddo
+
+          do 80 i=1, np
+             do 90 j=pos(i), pos(i+1)-1
+                gllnid(j)=i-1
+  90         continue
+  80      continue
+c         print *, 'printing gllnid, length: ',len
+c         call printi(gllnid, len)
+
+      return
+      end
+c--------------------------------------------------------
 c     assign to corresponding processor
       subroutine ldblce(psum, len, gllnid, np)
          integer psum(len)
@@ -196,7 +266,7 @@ c     assign to corresponding processor of gllnid, distributed method
 
       integer psum(nelt), newgllnid(nelgt)
       real ithreshb!, threshil, threshh
-      integer totalload, diva, ierr, pnelt
+      integer totalload, diva, ierr, pnelt, m, j
       integer assign_nid(nelt), nelt_array(np), tempgllnid(nelt)
       integer nelt_array_psum(np)
  
@@ -231,7 +301,57 @@ c     Gather the tempgllnid and store in newgllnid for each processor
      $   nelt_array, nelt_array_psum, mpi_integer, nekcomm, ierr)
 
 c     if(nid_ .eq. 2) then
-c        call printi(newgllnid, nelgt)
+c        do i=1, nelgt
+c           print *, 'before newgllnid:', i, newgllnid(i)
+c        enddo
+c     endif
+
+c     Limit the element number within lelt 
+      m = newgllnid(1)
+      j = 1
+      do i =2, nelgt
+c        if((i-1)/lelt .gt. newgllnid(i)) then
+c           newgllnid(i) = (i-1)/lelt
+c        endif
+         if(m .eq. newgllnid(i)) then
+            j = j+1
+            if(j .gt. lelt) then
+            print *, 'change newgllnid', i, newgllnid(i),newgllnid(i)+1
+               if(newgllnid(i) .lt. np) then
+                  newgllnid(i) = newgllnid(i)+1
+                  m = newgllnid(i)
+                  j = 1
+               else
+                 print *, '#elements execeeds lelt=', lelt
+               endif
+            endif
+         else
+            if(m>newgllnid(i)) then
+            print *, 'change newgllnid', i, newgllnid(i),m
+              newgllnid(i) = m
+              j = j+1
+              if(j .gt. lelt) then
+            print *, 'change newgllnid', i, newgllnid(i),newgllnid(i)+1
+               if(newgllnid(i) .lt. np) then
+                  newgllnid(i) = newgllnid(i)+1
+                  m = newgllnid(i)
+                  j = 1
+               else
+                 print *, '#elements execeeds lelt=', lelt
+               endif
+              endif
+            endif
+            if(m<newgllnid(i)) then
+               m = newgllnid(i)
+               j=1
+            endif
+         endif  
+      enddo
+
+c     if(nid_ .eq. 2) then
+c        do i=1, nelgt
+c           print *, 'after newgllnid:', i, newgllnid(i)
+c        enddo
 c     endif
       return
       end
@@ -467,7 +587,7 @@ c            call printi(pload, nelgt)
              !call printr(newPload, lelt)
    
              call izero(newgllnid, lelg) 
-             call ldblce(psum, nelgt, newgllnid, np_)
+             call ldblce_limit(psum, nelgt, newgllnid, np_)
 
 c            print *, 'print new gllnid'
 c            call printi(newgllnid, nelgt)
@@ -601,9 +721,9 @@ c subroutine to merge u array
           include 'CMTDATA'          
 
           integer newgllnid(lelg), trans(3, lelg)
-          real uarray(lx1*ly1*lz1, lelt) 
+          real uarray(lx1*ly1*lz1*toteq, lelt) 
           integer procarray(3, lelg) !keke changed real to integer to use crystal_ituple_transfer
-          real tempu(lx1*ly1*lz1, lelt)
+          real tempu(lx1*ly1*lz1*toteq, lelt)
           logical partl
           integer nl, sid, eid
           integer key, nkey, ifirstelement, ilastelement, u_n, trans_n
@@ -627,8 +747,8 @@ c subroutine to merge u array
                       do k=1, lz1
                           do n=1, ly1
                              do m=1, lx1
-                                ind=m+(n-1)*ly1+(k-1)*lz1*ly1+
-     $                                           (l-1)*toteq*lz1*ly1
+                                ind=m+(n-1)*lx1+(k-1)*lx1*ly1+
+     $                                           (l-1)*lz1*ly1*lx1
                                 uarray(ind, index_n) = u(m,n,k,l,i)
                              enddo
                           enddo
@@ -705,8 +825,8 @@ c         print *, 'nid: ', nid, 'trans_n', trans_n
                       do k=1, lz1
                           do n=1, ly1
                              do m=1, lx1
-                                ind=m+(n-1)*ly1+(k-1)*lz1*ly1+
-     $                                           (l-1)*toteq*lz1*ly1
+                                ind=m+(n-1)*lx1+(k-1)*lx1*ly1+
+     $                                           (l-1)*lz1*ly1*lx1
                                 tempu(ind, u_n) = u(m,n,k,l,i)
                              enddo
                           enddo
@@ -730,8 +850,8 @@ c         print *, 'nid: ', nid, 'trans_n', trans_n
                       do k=1, lz1
                           do n=1, ly1
                              do m=1, lx1
-                                ind=m+(n-1)*ly1+(k-1)*lz1*ly1+
-     $                                           (l-1)*toteq*lz1*ly1
+                                ind=m+(n-1)*lx1+(k-1)*lx1*ly1+
+     $                                           (l-1)*lz1*ly1*lx1
                                 uarray(ind, index_n) = u(m,n,k,l,i)
                                 u(m,n,k,l,i) = tempu(ind, i)
                              enddo
@@ -781,7 +901,7 @@ c         for verification !!!!!
                   do k=1, lz1
                       do n=1, ly1
                          do m=1, lx1
-                            ind=m+(n-1)*ly1+(k-1)*lz1*ly1 
+                            ind=m+(n-1)*lx1+(k-1)*lx1*ly1 
                             phigarray(ind, index_n) = phig(m,n,k,i)
                          enddo
                       enddo
@@ -862,7 +982,7 @@ c                 c) received from right neighbor
                   do k=1, lz1
                       do n=1, ly1
                          do m=1, lx1
-                            ind=m+(n-1)*ly1+(k-1)*lz1*ly1 
+                            ind=m+(n-1)*lx1+(k-1)*lx1*ly1 
                             tempphig(ind, phig_n) = phig(m,n,k,i)
                          enddo
                       enddo
@@ -884,7 +1004,7 @@ c                 c) received from right neighbor
              do k=1, lz1
                 do n=1, ly1
                     do m=1, lx1
-                        ind=m+(n-1)*ly1+(k-1)*lz1*ly1 
+                        ind=m+(n-1)*lx1+(k-1)*lx1*ly1 
                         phig(m,n,k,i) = tempphig(ind, i)
                     enddo
                 enddo

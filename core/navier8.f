@@ -1757,7 +1757,7 @@ c-----------------------------------------------------------------------
       parameter(mdw=2+2**ldim)
       parameter(ndw=7*lx1*ly1*lz1*lelv/mdw)
       common /scrns/ wk(mdw,ndw)   ! room for long ints, if desired
-      integer wk,e,eg,eg0,eg1
+      integer wk,e,eg,eg0,eg1, distrib
 
       character*132 mapfle
       character*1   mapfle1(132)
@@ -1834,7 +1834,12 @@ c     Distribute and assign partitions
             call bcast(gllnid,lng)
 c           call assign_gllnid(gllnid,gllel,nelgt,nelgv,np) ! gllel is used as scratch
          else
-            call recompute_partitions   !keke add, assign gllnid according to the elements load balance, gllnid has obtained within this function
+            distrib = param(80)
+            if (distrib.eq.1) then
+                call recompute_partitions_distr   !keke add, distributed load balance
+            else
+                call recompute_partitions   !keke add, assign gllnid according to the elements load balance, gllnid has obtained within this function
+            endif
             lng = isize*neli
             call bcast(pload,lng)
         endif

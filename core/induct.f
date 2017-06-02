@@ -948,7 +948,7 @@ c
          call getdr(dri,zgm1(1,1),nx1)
          call getdr(dsi,zgm1(1,2),ny1)
          if (if3d) call getdr(dti,zgm1(1,3),nz1)
-         print *, "came to compute_cfl"
+c        print *, "came to compute_cfl"
       endif
 
       cfl = 0.

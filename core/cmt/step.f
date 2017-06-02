@@ -177,7 +177,7 @@ c
       else
          icalld=1
       endif
-      print *, "came to compute_grid_h"
+c     print *, "came to compute_grid_h"
 
       do e=1,nelt
          do iz=1,nz1
@@ -307,7 +307,7 @@ c
       else
          icalld=1
       endif
-      print *, "came to compute_mesh_h"
+c     print *, "came to compute_mesh_h"
 
       ncrn=2**ndim
       rp=1.0/((nx1-1))

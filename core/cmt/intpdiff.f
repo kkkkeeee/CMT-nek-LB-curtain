@@ -90,7 +90,7 @@ C> by nek5000
          if (.not.ifgeom.and.ilstep.gt.1) return  ! already computed
          if (ifgeom.and.ilstep.eq.istep)  return  ! already computed
       endif
-      print *, "came to set_dealias_face"
+c     print *, "came to set_dealias_face"
       ilstep = istep
 
       call zwgl(zptf,wgtf,nxd)

@@ -186,17 +186,18 @@ c-----------------------------------------------------------------------
       integer modstep
       common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
       integer gfirst, inoassignd, resetFindpts, pload
-      integer reinit_step  !added by keke
+c     integer reinit_step  !added by keke
       integer counter !added by keke
       integer last_kstep !added by keke
-      real diff_time
+      real diff_time, diff_time2, reinit_interval
       real timet 
-      integer adaptivelb, stepvalue
+      integer adaptivelb, stepvalue, rebal
 
 
       call nekgsync()
       reinit_step=0
       diff_time = 0.0
+      diff_time2 = 0.0
       counter = 0
       last_kstep = 0
 
@@ -233,47 +234,31 @@ c     above. Then the particle locations are updated based on the new fluid forc
       do kstep=1,nsteps,msteps
          timet = DNEKCLOCK()
          call nek__multi_advance(kstep,msteps)
-c        if(nid .eq . 0) print *, "nek__multi_advance",
-c    $          DNEKCLOCK()-timet
-c        timet = DNEKCLOCK()
          
          call check_ioinfo  
-c        if(nid .eq . 0) print *, "check_ioinfo",
-c    $          DNEKCLOCK()-timet
-c        timet = DNEKCLOCK()
 
          call set_outfld
-c        if(nid .eq . 0) print *, "set_outfld",
-c    $          DNEKCLOCK()-timet
-c        timet = DNEKCLOCK()
 
          call userchk
-c        if(nid .eq . 0) print *, "userchk",
-c    $          DNEKCLOCK()-timet
-c        timet = DNEKCLOCK()
 
          call prepost (ifoutfld,'his')
-c        if(nid .eq . 0) print *, "prepost",
-c    $          DNEKCLOCK()-timet
-c        timet = DNEKCLOCK()
 
          call in_situ_check()
-c        if(nid .eq . 0) print *, "in_situ_check",
-c    $          DNEKCLOCK()-timet
-c        timet = DNEKCLOCK()
+
          resetFindpts = 0
          if (lastep .eq. 1) goto 1001
 
          adaptivelb = param(77)
+         if(nid .eq. 0) print *, 'adaptivelb', adaptivelb
          if (adaptivelb .eq. 0) then
              stepvalue = param(78)
              modstep = mod(kstep, stepvalue)
              if (modstep .eq. 0) then
                 resetFindpts = 1
                 call reinitialize
-                call printVerify
+                !call printVerify
              endif
-         else 
+         else if(adaptivelb .eq. 1) then 
 c           auto load balancing
             if(nid .eq. 0) then
                if(kstep .le. reinit_step+10) then !for the first 10 step after
@@ -311,11 +296,93 @@ c           auto load balancing
                    !call printVerify
                    reinit_step = kstep
                    if(nid .eq. 0) then
-                      print *, "reintilize, reinti_step:", reinit_step
+                      print *, "reintilize, reinit_step:", reinit_step
                    endif
                    diff_time = 0
                    INIT_TIME = 100
                    counter = 0
+               endif
+            endif
+         else  !for the new adaptive lb algorithm
+            if(nid .eq. 0 .and. reinit_step .eq. 0) then
+               if(kstep .le. reinit_step+10) then !for the first 10 step after
+                                            !rebalance, pick the minimum
+                                            !one as the init_time
+                  if((INIT_TIME .gt. TTIME_STP)
+     $                           .and. (TTIME_STP .ne. 0)) then
+                      INIT_TIME = TTIME_STP
+                  endif
+               else if(kstep .gt. reinit_step+100) then
+                  diff_time = (TTIME_STP-INIT_TIME)/INIT_TIME
+                  diff_time2 = TTIME_STP-INIT_TIME
+                  if(nid .eq. 0) then
+                     print *, "nid:", nid, "ttime_stp:", TTIME_STP,
+     $                                INIT_TIME, diff_time
+                  endif
+               endif
+            endif
+
+            call bcast(diff_time, 8)
+            call bcast(diff_time2, 8)
+            if(reinit_step .ne. 0) then
+               if(kstep-reinit_step .eq. 1) then
+                   lb_time=ttime_stp !added by keke for adaptive lb
+                   if(nid .eq. 0) print *,'istep',istep,'reinit_step',
+     :                     reinit_step,'lb_time', lb_time
+                  call bcast(lb_time,8)
+                  rebal=int(sqrt(2*reinit_interval*lb_time/diff_time2))
+c                 if(nid .eq. 0) then
+                     print *, 'rebal:', rebal, 'lb_time:',lb_time
+     $                ,'reinit_interval', reinit_interval
+     $                ,'diff_time2', diff_time2,kstep, nid
+c                 endif
+               else if(kstep .le. reinit_step+10) then !for the first 10 step after
+                                            !rebalance, pick the minimum
+                                            !one as the init_time
+                  if((INIT_TIME .gt. TTIME_STP)
+     $                           .and. (TTIME_STP .ne. 0)) then
+                      INIT_TIME = TTIME_STP
+                  endif
+               else if(kstep-reinit_step.ge.rebal)then
+                  diff_time2 = TTIME_STP-INIT_TIME
+                  call bcast(diff_time2, 8)
+                  if(diff_time2 .gt. 0) then 
+                     resetFindpts = 1
+                     call reinitialize
+                     reinit_interval = kstep - reinit_step
+                     reinit_step = kstep
+                     INIT_TIME = 100
+                     if(nid .eq. 0) then
+                        print *, "reintilize, reinit_step:", reinit_step
+                     endif
+                  endif
+               endif
+            endif
+            if (diff_time .gt. 0.2 .and. reinit_step .eq. 0) then
+               if (last_kstep .eq. 0) then
+                   counter = counter + 1
+               else if((counter .le. 2) .and.
+     $                     (last_kstep .eq. kstep-1))then
+                   counter = counter + 1
+               else
+                   counter = 0
+               endif
+               last_kstep = kstep
+               if (counter .gt. 2) then 
+                   !print *, "into the reinit, nid:", nid, "diff_time:",
+     $            !diff_time
+                   resetFindpts = 1
+                   call reinitialize
+                   !call printVerify
+                   reinit_interval = kstep - reinit_step
+                   reinit_step = kstep
+                   diff_time = 0
+                   INIT_TIME = 100
+                   counter = 0
+                   if(nid .eq. 0) then
+                      print *, "first reintilize, reinit_step:"
+     $                   , reinit_step
+                   endif
                endif
             endif
          endif
@@ -326,6 +393,7 @@ c           auto load balancing
       call nek_comm_settings(isyc,0)
 
       call comment
+
 
 c     check for post-processing mode
       if (instep.eq.0) then
@@ -465,9 +533,9 @@ c-----------------------------------------------------------------------
          istep = istep+i
          timet = DNEKCLOCK()
          call nek_advance
-         if(nid .eq . 0) print *, "nek_advance",
-     $          DNEKCLOCK()-timet
-         timet = DNEKCLOCK()
+c        if(nid .eq . 0) print *, "nek_advance",
+c    $          DNEKCLOCK()-timet
+c        timet = DNEKCLOCK()
 
          if (ifneknek) call userchk_set_xfer
 c        if(nid .eq . 0) print *, "userchk_set_xfer",

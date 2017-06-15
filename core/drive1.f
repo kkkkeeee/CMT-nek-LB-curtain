@@ -102,19 +102,20 @@ c      COMMON /SCRCG/ DUMM10(LX1,LY1,LZ1,LELT,1)
 
       call dg_setup    !     Setup DG, if dg flag is set.
 
-      if (ifflow.and.(fintim.ne.0.or.nsteps.ne.0)) then    ! Pressure solver 
-         call estrat                                       ! initialization.
-         if (iftran.and.solver_type.eq.'itr') then         ! Uses SOLN space 
-            call set_overlap                               ! as scratch!
-         elseif (solver_type.eq.'fdm'.or.solver_type.eq.'pdm')then
-            ifemati = .true.
-            kwave2  = 0.0
-            if (ifsplit) ifemati = .false.
-            call gfdm_init(nx2,ny2,nz2,ifemati,kwave2)
-         elseif (solver_type.eq.'25D') then
-            call g25d_init
-         endif
-      endif
+c     commented by keke, set_overlap takes too much time
+c     if (ifflow.and.(fintim.ne.0.or.nsteps.ne.0)) then    ! Pressure solver 
+c        call estrat                                       ! initialization.
+c        if (iftran.and.solver_type.eq.'itr') then         ! Uses SOLN space 
+c           call set_overlap                               ! as scratch!
+c        elseif (solver_type.eq.'fdm'.or.solver_type.eq.'pdm')then
+c           ifemati = .true.
+c           kwave2  = 0.0
+c           if (ifsplit) ifemati = .false.
+c           call gfdm_init(nx2,ny2,nz2,ifemati,kwave2)
+c        elseif (solver_type.eq.'25D') then
+c           call g25d_init
+c        endif
+c     endif
 
       if(ifcvode) call cv_setsize
 
@@ -305,7 +306,7 @@ c           auto load balancing
             endif
          else  !for the new adaptive lb algorithm
             if(nid .eq. 0 .and. reinit_step .eq. 0) then
-               if(kstep .le. reinit_step+10) then !for the first 10 step after
+               if(kstep .le. reinit_step+100) then !for the first 10 step after
                                             !rebalance, pick the minimum
                                             !one as the init_time
                   if((INIT_TIME .gt. TTIME_STP)
@@ -331,11 +332,11 @@ c           auto load balancing
      :                     reinit_step,'lb_time', lb_time
                   call bcast(lb_time,8)
                   rebal=int(sqrt(2*reinit_interval*lb_time/diff_time2))
-c                 if(nid .eq. 0) then
+                  if(nid .eq. 0) then
                      print *, 'rebal:', rebal, 'lb_time:',lb_time
      $                ,'reinit_interval', reinit_interval
      $                ,'diff_time2', diff_time2,kstep, nid
-c                 endif
+                  endif
                else if(kstep .le. reinit_step+10) then !for the first 10 step after
                                             !rebalance, pick the minimum
                                             !one as the init_time
@@ -358,7 +359,7 @@ c                 endif
                   endif
                endif
             endif
-            if (diff_time .gt. 0.2 .and. reinit_step .eq. 0) then
+            if (diff_time .gt. 0.05 .and. reinit_step .eq. 0) then
                if (last_kstep .eq. 0) then
                    counter = counter + 1
                else if((counter .le. 2) .and.

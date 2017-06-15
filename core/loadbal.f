@@ -256,6 +256,142 @@ c         call printi(gllnid, len)
           
       return
       end
+c--------------------------------------------------------
+c     assign to corresponding processor of gllnid, distributed method
+      subroutine ldblce_dist_new(psum, newgllnid)
+      include 'mpif.h'
+      include 'SIZE'
+      include 'PARALLEL'
+      include 'CMTPART'
+
+      common /nekmpi/ nid_,np_,nekcomm,nekgroup,nekreal
+
+      integer psum(nelt), newgllnid(nelgt)
+      real ithreshb!, threshil, threshh
+      integer totalload, diva, ierr, pnelt, m, j
+      integer tempgllnid(nelt), preElem
+      integer nelt_array_psum(np)
+      integer status_mpi(MPI_STATUS_SIZE)
+      integer posArray(2, np), npos, nposArray(np), posArrayGlo(2,np)
+      integer preSum_npos, npos_array(np)
+!     posArray store where the element change; for example, if
+!     tempgllnid={0,0,0,1,1,1,2,3,3}, posArray=
+!     (0,1)(1,4)(2,7)(3,8)
+
+      totalload = nw + ceiling(nw*1.0/nelgt)*nelgt
+      !print *, nid_, totalload
+
+      threshb = totalload*1.0/np
+
+      do i = 1, nelt
+         diva = AINT((psum(i)-1)*1.0/threshb)
+         tempgllnid(i) = diva
+      enddo
+
+c     send tempgllnid(nelt) to the next processor, except for the last processor
+      if(nid .ne. np-1) then
+         call mpi_send(tempgllnid(nelt), 1, mpi_integer, nid+1, 0
+     $      , nekcomm, ierr)
+c        print *, 'send ', nid, nid+1, tempgllnid(nelt)
+      endif
+
+      if(nid .ne. 0) then
+         call mpi_recv(preElem, 1, mpi_integer, nid-1, 0, nekcomm
+     $      , status_mpi, ierr)
+c        print *, 'receive ', nid-1, nid, preElem
+      endif
+
+c     Get exclusive prefix sum of nelt, sort it in pnelt
+      pnelt = igl_running_sum_ex(nelt)
+
+      call izero(posArray, 2*np)
+      npos = 0
+      if(nid .eq. 0) preElem = -1
+      if(preElem .ne. tempgllnid(1)) then
+         npos = npos + 1
+         posArray(1,npos) = tempgllnid(1)
+         posArray(2,npos) = 1 + pnelt !get the local element id
+      endif
+      preElem = tempgllnid(1)
+      do i=2, nelt
+          if(preElem .ne. tempgllnid(i)) then
+             npos = npos + 1
+             posArray(1,npos) = tempgllnid(i)
+             posArray(2,npos) = i + pnelt !get the local element id
+             preElem = tempgllnid(i)
+          endif
+      enddo
+
+c     do i= 1, npos
+c        print *, 'ElmProBegin', nid, npos, posArray(1,i),
+c    $       posArray(2,i)
+c     enddo
+
+c     Get exclusive prefix sum of npos, store it in preSum_npos
+c     npos   1 2 1 1  (npos_array: number of cut/transition points in processors 
+c                       P1, P2, P3, P4) 
+c     preSum_npos 0 1 3 4 
+c     nposArray   0 1 3 4 in every processor (start position of npos in
+c                                             global buffer)
+c     print *, 'pos:', nid, npos
+      npos = 2*npos !*2 because posArray is 2-d array
+      preSum_npos = igl_running_sum_ex(npos)
+c     print *, nid, preSum_npos
+      call mpi_allgather(preSum_npos, 1, mpi_integer, nposArray
+     $    , 1,  MPI_INTEGER, nekcomm, ierr)
+
+c     Get nelt_array for every processor
+      call mpi_allgather(npos, 1, mpi_integer, npos_array, 1,
+     $   MPI_INTEGER, nekcomm, ierr) !note here, the receive buff is also 1 not np
+
+c     Gather posArray into posArrayGlo
+      call mpi_allgatherv(posArray, npos, mpi_integer, posArrayGlo,
+     $   npos_array, nposArray, mpi_integer, nekcomm, ierr)
+
+c     do i=1,np
+c        print *, 'posArrayGlo', nid, i, posArrayGlo(1,i)
+c    $      , posArrayGlo(2,i)
+c     enddo
+
+
+c     limit the number of element in a processor
+      do i = 2, np
+         if(posArrayGlo(2,i)-posArrayGlo(2,i-1) .gt. lelt) then
+            if(nid .eq. 0)
+     $      print *, 'proc ', i-1, 'exceed lelt, rearranged'
+            posArrayGlo(2,i) = posArrayGlo(2,i-1)+lelt
+         endif
+      enddo
+      if(nelgt+1-posArrayGlo(2,np) .gt. lelt) then
+         posArrayGlo(2,np) = nelgt+1-lelt
+         do i=np, 2, -1
+            if(posArrayGlo(2,i)-posArrayGlo(2,i-1) .gt. lelt) then
+               if(nid .eq. 0)
+     $           print *, 'proc ', i-1, 'exceed lelt, rearranged'
+               posArrayGlo(2,i-1) = posArrayGlo(2,i)-lelt
+            else
+               exit
+            endif
+         enddo
+      endif
+c     print *, 'load of p', i-1, psum(pos(i+1)-1)-psum(pos(i)-1)
+c    $                 ,pos(i), pos(i+1)-1
+      do i=1,np-1
+         do j=posArrayGlo(2,i),  posArrayGlo(2,i+1)-1
+            newgllnid(j)=posArrayGlo(1,i)
+         enddo
+      enddo
+      do i = j, nelgt
+         newgllnid(i) = np-1
+      enddo
+
+c     do i =1, nelgt
+c        print *, 'newgllnid', nid, i, newgllnid(i)
+c     enddo
+
+      return
+      end
+
 
 c--------------------------------------------------------
 c     assign to corresponding processor of gllnid, distributed method
@@ -419,44 +555,56 @@ c         common  /cparti/ ipart(li,llpart)
           common /elementrange/ xerange
 
 c         common  /iparti/ n,nr,ni
-          integer particleMap(3, lelg)
+c         integer particleMap(3, lelg)
           integer gaselement(np), ierr, nn, partialload, totalload
           real ratio
-          
+
+          if(nid_ .eq. 0) then
+             print *, 'in recompute_partitions_distr'
+          endif
+          call nekgsync()          
           starttime = dnekclock()
           nxyz = nx1*ny1*nz1   !total # of grid point per element
           call izero(pload, lelg)
           delta = ceiling(nw*1.0/nelgt)
           ratio = 1.0
-          if(nid_ .eq. 0) then
-             print *, 'in recompute_partitions_distr'
-             print * ,'nw:', nw, 'delta:', delta, 'ratio', ratio
-          endif
+c         if(nid_ .eq. 0) then
+c            print *, 'in recompute_partitions_distr'
+c            print * ,'nw:', nw, 'delta:', delta, 'ratio', ratio
+c         endif
           ntuple = nelt
-          do i=1,ntuple
-             eg = lglel(i)
-             particleMap(1,i) = eg
-             particleMap(2,i) = 0        ! processor id to send for element eg
-             particleMap(3, i) = 0      !  #of particles in each element, reinitialize to 0, otherwise it keeps the previous value
-          enddo
+c         do i=1,ntuple
+c            eg = lglel(i)
+c            particleMap(1,i) = eg
+c            particleMap(2,i) = 0        ! processor id to send for element eg
+c            particleMap(3, i) = 0      !  #of particles in each element, reinitialize to 0, otherwise it keeps the previous value
+c         enddo
 
+          call izero(pload, lelg) 
           do ip=1,n
              el = ipart(je0, ip) + 1      ! element id in ipart is start from 0, so add 1
-             particleMap(3, el) = particleMap(3, el) + 1
+c            particleMap(3, el) = particleMap(3, el) + 1
+             pload(el) = pload(el)+1
           enddo
 
           do i=1,ntuple
-                particleMap(3, i) = particleMap(3, i) + delta*ratio
+c                particleMap(3, i) = particleMap(3, i) + delta*ratio
+                 pload(i) = pload(i) + delta*ratio
           enddo
-           do i=1,ntuple
-              pload(i) = particleMap(3, i)
-           enddo
+c          do i=1,ntuple
+c             pload(i) = particleMap(3, i)
+c          enddo
 
            call izero(psum, lelt)
            call preSum(pload, psum, nelt)
 
+c          t0 = dnekclock()
            nn = psum(nelt)
            partialload= igl_running_sum_ex(nn) !exclusive prefix sum
+c         if( mod(nid, np/2) .eq. np/2-2 .or. nid .eq.0) then
+c         print *, " igl_running_sum_ex" , dnekclock() - t0, t0,
+c    $        dnekclock()
+c         endif
 
 c          now every processor has the actual prefix sum
            do i=1, nelt
@@ -468,7 +616,16 @@ c          now every processor has the actual prefix sum
            !if (nid .eq.0) call printi(lglel,lelt)
 
            call izero(newgllnid, lelg)
-           call ldblce_dist(psum, newgllnid)
+           if( mod(nid, np/2) .eq. np/2-2) then
+          print *, "before ldblce_dist_new" , dnekclock() - starttime
+          endif
+c          call ldblce_dist(psum, newgllnid)
+           t0 = dnekclock()
+           call ldblce_dist_new(psum, newgllnid)
+           if( mod(nid, np/2) .eq. np/2-2) then
+          print *, "in ldblce_dist_new" , dnekclock() - t0
+          endif
+           t0 = dnekclock()
 
           call izero(trans, 3*lelg)
           call track_elements(gllnid, newgllnid, nelgt, trans,
@@ -479,9 +636,12 @@ c    $           trans(1, i), trans(2, i), trans(3, i)
 c         enddo
 
           call track_particles(trans, trans_n)
+          call nekgsync()
           endtime = dnekclock()
           if( mod(nid, np/2) .eq. np/2-2) then
-          print *, "Component 0:" , endtime - starttime
+          print *, "Component 0:" , endtime - starttime!, starttime,
+c    $         endtime
+          print *, "after ldblce_dist_new:" , endtime - t0
           endif
           !call mergePhigArray(newgllnid, trans, trans_n)
           !call mergeUArray(newgllnid)
@@ -541,14 +701,16 @@ c         if(nid .eq. 0) then
 c             print *, 'old pload:'
 c             call printi(pload, nelgt)
 c         endif
+          call nekgsync()
           starttime = dnekclock()
           nxyz = nx1*ny1*nz1   !total # of grid point per element
           delta = ceiling(nw*1.0/nelgt)
           ratio = 1.0
           ntuple = nelt
-          if(nid .eq. 0) then
-             print *, 'delta:', delta, 'nw:', nw, 'ntuple:', ntuple
-          endif
+c         if(nid .eq. 0) then
+c            print *, 'delta:', delta, 'nw:', nw, 'ntuple:', ntuple
+c            print *, 'starttime', starttime 
+c         endif
           do i=1,ntuple
              eg = lglel(i)
              particleMap(1,i) = eg
@@ -609,7 +771,12 @@ c            do i=1, nelgt
 c               print *, 'psum', i, psum(i)
 c            enddo 
              call izero(newgllnid, lelg) 
+             print *, "before ldblce_limit", dnekclock()-starttime
+c    $            ,starttime, dnekclock()
+             t0 = dnekclock()  
              call ldblce_limit(psum, nelgt, newgllnid, np_)
+             print *, "in ldblce_limit", dnekclock()-t0
+             t0 = dnekclock()  
 c            do i=1, nelgt
 c               print *, 'newgllnid', i, newgllnid(i)
 c            enddo 
@@ -632,14 +799,19 @@ c            enddo
           call track_elements(gllnid, newgllnid, nelgt, trans, 
      $                               trans_n, lglel)
 c         print *, 'print trans'
-          do 110 i=1, trans_n
-            print *, 'trans', trans(1, i), trans(2, i), trans(3, i)
-  110  continue
+c         do 110 i=1, trans_n
+c           print *, 'trans', trans(1, i), trans(2, i), trans(3, i)
+c 110  continue
 
           call track_particles(trans, trans_n)
+          call nekgsync()
           endtime = dnekclock()
-          if( mod(nid, np/2) .eq. np/2-2) then
-          print *, "Component 0:" , endtime - starttime 
+          if( mod(nid, np/2) .eq. np/2-2 .or. nid .eq. 0) then
+          print *, "Component 0:" , endtime - starttime !, starttime,
+c    $                     endtime 
+          endif
+          if( nid .eq.0) then
+          print *, "after ldblce_limit:" , endtime - t0 
           endif
 c         call mergePhigArray(newgllnid, trans, trans_n)
 c         call mergePhigArray_new(newgllnid)
@@ -1634,6 +1806,7 @@ c
       real starttime, endtime
 
       inoassignd = 0
+      call nekgsync()          
       starttime = dnekclock()
       call readat
       etims0 = dnekclock_sync()
@@ -1730,6 +1903,8 @@ c
         call nek_cmt_init
         if (nio.eq.0) write(6,*)'Initialized DG machinery'
 #endif
+
+      call nekgsync()          
       endtime = dnekclock()
       if( mod(nid, np/2) .eq. np/2-2) then
           print *, "total reinit time", endtime - starttime

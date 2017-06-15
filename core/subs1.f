@@ -630,7 +630,7 @@ C           -C IS Target Courant number
             IF(DISCR.LE.0.0)THEN
                if (nio.eq.0) 
      $         PRINT*,'Problem calculating new DT Discriminant=',discr
-               PRINT*,"Problem Details",nid, DT, CTARG, COURNO, A, B, C
+c              PRINT*,"Problem Details",nid, DT, CTARG, COURNO, A, B, C
                DT=DT*(CTARG/COURNO)
 C               IF(DT.GT.DTOLD) DT=DTOLD
             ELSE IF(ABS((VCOUR-VOLD)/VCOUR).LT.0.001)THEN

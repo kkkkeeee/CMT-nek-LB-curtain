@@ -172,12 +172,21 @@ c     ifield=1			!c? avo: set in set_overlap through 'TSTEP'?
 c     Set global index of dirichlet nodes to zero; xxt will ignore them
 
       call gs_setup(gs_handle,se_to_gcrs,ntot,nekcomm,mp)
+c     if(nid .eq.0) print *, 'gs_setup', dnekclock()-t0
+c     t1 = dnekclock() 
       call gs_op   (gs_handle,mask,1,2,0)  !  "*"
+c     if(nid .eq.0) print *, 'gs_op mask', dnekclock()-t1
+c     t1 = dnekclock() 
       call gs_op   (gs_handle,cmlt,1,1,0)  !  "+"
+c     if(nid .eq.0) print *, 'gs_op cmlt', dnekclock()-t1
+c     t1 = dnekclock() 
       call gs_free (gs_handle)
       call set_jl_crs_mask(ntot,mask,se_to_gcrs)
-
+c     if(nid .eq.0) print *, 'set_jl_crs_mask', dnekclock()-t1
+c     t1 = dnekclock() 
       call invcol1(cmlt,ntot)
+c     if(nid .eq.0) print *, 'invcol1', dnekclock()-t1
+c     t1 = dnekclock() 
 
 c     Setup local SEM-based Neumann operators (for now, just full...)
 
@@ -192,6 +201,8 @@ c        NOTE: a(),h1,...,w2() must all be large enough
          call rone (h1,n)
          call rzero(h2,n)
          call get_local_crs_galerkin(a,ncr,nxc,h1,h2,w1,w2)
+c     if(nid .eq.0) print *, 'get_local_crs_galerkin', dnekclock()-t1
+c     t1 = dnekclock() 
 c      endif
 
       call set_mat_ij(ia,ja,ncr,nelv)
@@ -201,11 +212,15 @@ c      endif
       elseif (ifield.eq.ifldmhd) then
          if (ifbcor)  null_space=1
       endif
+c     if(nid .eq.0) print *, 'set_mat_ij', dnekclock()-t1
+c     t1 = dnekclock() 
 
       nz=ncr*ncr*nelv
       call crs_setup(xxth(ifield),nekcomm,mp, ntot,se_to_gcrs,
      $               nz,ia,ja,a, null_space)
 c     call crs_stats(xxth(ifield))
+c     if(nid .eq.0) print *, 'crs_setup', dnekclock()-t1
+c     t1 = dnekclock() 
 
       t0 = dnekclock()-t0
       if (nio.eq.0) then
@@ -1758,12 +1773,17 @@ c-----------------------------------------------------------------------
       parameter(ndw=7*lx1*ly1*lz1*lelv/mdw)
       common /scrns/ wk(mdw,ndw)   ! room for long ints, if desired
       integer wk,e,eg,eg0,eg1, distrib
+      common /inputfiles/ mapdata(mdw,ndw)
+      integer mapdata   
+      integer neli
+      save neli
 
       character*132 mapfle
       character*1   mapfle1(132)
       equivalence  (mapfle,mapfle1)
 
       starttime = dnekclock()
+      if (gfirst .eq. 1) then
       iok = 0
       if (nid.eq.0) then
          lfname = ltrunc(reafle,132) - 4
@@ -1792,6 +1812,7 @@ c-----------------------------------------------------------------------
          call exitt
       endif 
 
+      !print *, "Debug neli", npass, neli, ndw
       len = 4*mdw*ndw
       if (nid.gt.0.and.nid.lt.npass) msg_id=irecv(nid,wk,len)
       call nekgsync
@@ -1813,14 +1834,29 @@ c-----------------------------------------------------------------------
             eg0 = eg1
          enddo
          close(80)
+         call icopy(mapdata, wk, mdw*ndw)
          ntuple = m
          endtime = dnekclock()
          print *, "read map file", endtime - starttime
       elseif (nid.lt.npass) then
          call msgwait(msg_id)
+         call icopy(mapdata, wk, mdw*ndw)
          ntuple = ndw
       else
          ntuple = 0
+      endif
+      else
+          npass = 1 + (neli/ndw)
+          !print *, "Debug nelgt", nid,  nelgt, mdw, ndw, neli, npass 
+          if (nid .eq. 0) then 
+              call icopy(wk, mapdata, mdw*ndw)
+              ntuple = neli-(npass-1)*ndw
+          else if (nid .lt. npass) then
+              ntuple = ndw
+              call icopy(wk, mapdata, mdw*ndw) 
+          else
+              ntuple = 0
+          endif
       endif
 
 c     Distribute and assign partitions
@@ -1987,7 +2023,7 @@ c
       call crystal_ituple_transfer(cr_h, tuple,m,ni,nmax, ky)
 
       nimx = iglmax(ni,1)
-      if (ni.gt.nmax)   write(6,*) ni,nmax,n,'cr_xfer problem, A'
+      if (ni.gt.nmax)   write(6,*) nid, ni,nmax,n,'cr_xfer problem, A'
       if (nimx.gt.nmax) call exitt
 
       nkey = m-2

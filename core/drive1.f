@@ -193,6 +193,7 @@ c     integer reinit_step  !added by keke
       real diff_time, diff_time2, reinit_interval
       real timet 
       integer adaptivelb, stepvalue, rebal
+c     real starttime
 
 
       call nekgsync()
@@ -234,17 +235,35 @@ c     with the elements to different processors as part of the load balancing in
 c     above. Then the particle locations are updated based on the new fluid force calculations done in step(3).
       do kstep=1,nsteps,msteps
          timet = DNEKCLOCK()
+c        starttime = DNEKCLOCK()
          call nek__multi_advance(kstep,msteps)
-         
+c        if(nid.eq. 0) print *, 'nek__multi_advance',
+c    $      DNEKCLOCK()-starttime 
+c        starttime = DNEKCLOCK()
          call check_ioinfo  
+c        if(nid.eq. 0) print *, 'check_ioinfo',
+c    $      DNEKCLOCK()-starttime 
+c        starttime = DNEKCLOCK()
 
          call set_outfld
+c        if(nid.eq. 0) print *, 'set_outfld',
+c    $      DNEKCLOCK()-starttime 
+c        starttime = DNEKCLOCK()
 
          call userchk
+c        if(nid.eq. 0) print *, 'userchk',
+c    $      DNEKCLOCK()-starttime 
+c        starttime = DNEKCLOCK()
 
          call prepost (ifoutfld,'his')
+c        if(nid.eq. 0) print *, 'prepost',
+c    $      DNEKCLOCK()-starttime 
+c        starttime = DNEKCLOCK()
 
          call in_situ_check()
+c        if(nid.eq. 0) print *, 'in_situ_check()',
+c    $      DNEKCLOCK()-starttime 
+c        starttime = DNEKCLOCK()
 
          resetFindpts = 0
          if (lastep .eq. 1) goto 1001
@@ -304,7 +323,7 @@ c           auto load balancing
                    counter = 0
                endif
             endif
-         else  !for the new adaptive lb algorithm
+         else if (adaptivelb .eq. 2) then !for the new adaptive lb algorithm
             if(nid .eq. 0 .and. reinit_step .eq. 0) then
                if(kstep .le. reinit_step+100) then !for the first 10 step after
                                             !rebalance, pick the minimum
@@ -359,7 +378,7 @@ c           auto load balancing
                   endif
                endif
             endif
-            if (diff_time .gt. 0.05 .and. reinit_step .eq. 0) then
+            if (diff_time .gt. 0.2 .and. reinit_step .eq. 0) then
                if (last_kstep .eq. 0) then
                    counter = counter + 1
                else if((counter .le. 2) .and.
@@ -386,7 +405,9 @@ c           auto load balancing
                    endif
                endif
             endif
-         endif
+         else if (adaptivelb .eq. 3) then
+            call adaptive_loadbalance(kstep) 
+         endif 
       enddo
  1001 lastep=1
 
@@ -413,6 +434,84 @@ c     check for post-processing mode
       RETURN
       END
 
+c-----------------------------------------------------------------------
+      subroutine adaptive_loadbalance(kstep)
+      include 'SIZE'
+      include 'TSTEP'
+      include 'INPUT'
+      include 'CTIMER'
+      include 'PARALLEL'
+
+      common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
+      integer gfirst, inoassignd, resetFindpts, pload
+
+      integer kstep
+      integer c1_step
+      integer c2_step
+      integer tt, timesLoadBalance, nmax
+      real lb_overhead, m, runtime
+      real start_time, lb_time2, t2_time
+      real t1_time
+      save t1_time
+      data t1_time / 0.0/
+      integer lb_interval
+      save lb_interval
+      data lb_interval /1000000/ 
+
+      if (lb_interval .eq. 1000000 .and. nid .eq. 0) then
+          if (kstep .gt. 3 .and. kstep .lt. 14) then
+              t1_time = t1_time + TTIME_STP
+          endif  
+          if (kstep .eq. 14) then
+              t1_time = t1_time/10.0
+              c1_step = 7
+          endif  
+          if(kstep .gt. 14) then
+              diff_time = (TTIME_STP-t1_time)/t1_time
+              print *, "nid:", nid, "ttime_stp:", TTIME_STP,
+     $                                t1_time, diff_time
+          endif
+      endif 
+
+      if (lb_interval .eq. 1000000) then
+          call bcast(diff_time, 8) 
+          if (diff_time .gt. 0.2) then
+              c2_step = kstep 
+              t2_time = TTIME_STP
+              m = (t2_time - t1_time) / (c2_step - c1_step)
+              start_time = dnekclock()
+              resetFindpts = 1
+              call reinitialize
+              lb_time2 = dnekclock() - start_time
+              if (nid .eq. 0) then
+                   lb_overhead = lb_time2/t1_time
+                   tt = nsteps - c2_step
+                   nmax = int(ceiling(tt/lb_overhead))
+                   timesLoadBalance = 0
+                   runtime = 1.0/2.0 * tt * (tt * m)
+                   do i=1, nmax
+                       r=lb_time2*i + (i+1)*0.5*(tt/(i+1))*(tt/(i+1))*m
+                       if (r < runtime) then
+                           runtime = r
+                           timesLoadBalance = i
+                       else
+                           exit
+                       endif
+                   enddo 
+                   lb_interval = tt/timesLoadBalance
+              endif
+              call bcast(lb_interval, 4) 
+              if (nid .eq. 0) then
+                  print * , "lb_interval", lb_interval, c2_step
+              endif
+          endif
+      endif
+      if (kstep - c2_step .eq. lb_interval) then
+          resetFindpts = 1
+          call reinitialize
+          c2_step = kstep
+      endif
+      end
 c-----------------------------------------------------------------------
       subroutine nek_advance
 

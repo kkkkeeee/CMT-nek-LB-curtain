@@ -1808,6 +1808,7 @@ c
       inoassignd = 0
       call nekgsync()          
       starttime = dnekclock()
+      etime = dnekclock()
       call readat
       etims0 = dnekclock_sync()
       if (nio.eq.0) then

@@ -1,6 +1,8 @@
 C> @file diffusive_cmt.f routines for diffusive fluxes.
 C> Some surface. Some volume. All pain. Jacobians and other factorizations.
 
+C> \ingroup vsurf
+C> @{
 C> ummcu = \f$\mathbf{U}^--\{\{\mathbf{U}\}\}\f$
       subroutine imqqtu(ummcu,uminus,uplus)
 ! Computes (I-0.5*QQT)U for all five conserved variables.
@@ -26,11 +28,14 @@ C> ummcu = \f$\mathbf{U}^--\{\{\mathbf{U}\}\}\f$
          call add2(ummcu(1,ivar),uminus(1,ivar),nf)!ummcu = U -{{U}}
       enddo
 
+C> @}
       return
       end
 
 !-----------------------------------------------------------------------
 
+C> \ingroup bcond
+C> @{
 C> umubc = \f$\mathbf{U}^--\mathbf{U}^D\f$
       subroutine imqqtu_dirichlet(umubc,wminus,wplus)
 ! v+ undefined on boundary faces, so (I-0.5QQ^T) degenerates to 
@@ -89,11 +94,14 @@ C> umubc = \f$\mathbf{U}^--\mathbf{U}^D\f$
       enddo
       enddo
 
+C> @}
       return
       end
 
 !-----------------------------------------------------------------------
 
+C> \ingroup vfjac
+C> @{
 C> flux = \f$\mathscr{A}\f$ dU = \f$\left(\mathscr{A}^{\mbox{NS}}+\mathscr{A}^{\mbox{EVM}}\right) \f$dU 
       subroutine agradu(flux,du,e,eq)
       include 'SIZE'
@@ -134,9 +142,10 @@ C> \f$\nu_s \nabla \rho\f$, \f$\nu_s \left(\nabla \rho \right) \otimes \mathbf{u
 C> and \f$\nu_s \nabla \left(\rho e\right)\f$.  \f$\nu_s=0\f$ for Navier-Stokes
       call fluxj_evm(flux,du,e,eq)
 
-! no idea where phi goes
-      if (eq .lt. toteq) call col2(flux,phig(1,1,1,e),nx1*ny1*nz1)
+! no idea where phi goes. put it out front
+!     call col2(flux,phig(1,1,1,e),nx1*ny1*nz1)
 
+C> @}
       return
       end
 
@@ -242,7 +251,7 @@ C> the compressible Navier-Stokes equations (NS).
 
 ! diffusion due to grad rho
       if (eq .eq. 1) then
-         do j=1,ndim ! flux+= viscscr*nu_s*grad (phig*rho)
+         do j=1,ndim ! flux+= viscscr*nu_s*grad (rho)
             call addcol3(flux(1,j),vdiff(1,1,1,e,inus),du(1,1,j),n)
          enddo
       else
@@ -262,7 +271,6 @@ C> the compressible Navier-Stokes equations (NS).
                call vdot2(viscscr,vx(1,1,1,e),vy(1,1,1,e),
      >                            vx(1,1,1,e),vy(1,1,1,e),n)
             endif
-            call col2(viscscr,phig(1,1,1,e),n)
             call col2(viscscr,vdiff(1,1,1,e,inus),n)
             do j=1,ndim
                call addcol3(flux(1,j),du(1,1,j),viscscr,n)
@@ -299,6 +307,7 @@ C> the compressible Navier-Stokes equations (NS).
 
       do j=1,ndim
          call col2(diffh(1,j),bm1(1,1,1,e),n)
+!        call col2(diffh(1,j),phig(1,1,1,e),n) ! still no idea where phi goes
       enddo
 
 !     const=-1.0 ! I0
@@ -343,6 +352,7 @@ C> the compressible Navier-Stokes equations (NS).
          enddo
          enddo
       enddo
+
       return
       end
 

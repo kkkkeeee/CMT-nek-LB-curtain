@@ -8,10 +8,12 @@ C
       INCLUDE 'PARALLEL'
       INCLUDE 'ZPER'
  
+      common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
+      integer gfirst, inoassignd, resetFindpts, pload
+
       logical ifbswap,ifre2,parfound
       character*132 string
       integer idum(3*numsts+3)
-
       ierr = 0
       call flush_io
 
@@ -24,6 +26,9 @@ C
          return
       endif  
 
+      call nekgsync()
+      starttime = dnekclock()
+      if(gfirst .eq. 1) then
       if(nid.eq.0) then
         write(6,'(A,A)') ' Reading ', reafle
         open (unit=9,file=reafle,status='old', iostat=ierr)
@@ -54,8 +59,20 @@ C     Read Mesh Info
 
       if (ifre2) call open_bin_file(ifbswap) ! rank0 will open and read
       call chk_nel  ! make certain sufficient array sizes
+      endif !endif for gfirst 
 
+      call nekgsync()
+      endtime = dnekclock()
+      if(nid .eq. 0) print *, "omit time 1", endtime-starttime
+      starttime = dnekclock()
+ 
       if (.not.ifgtp) call mapelpr  ! read .map file, est. gllnid, etc.
+      endtime = dnekclock()
+      if(nid .eq. 0) print *, "mapelpr time ", endtime-starttime
+
+      call nekgsync()
+      starttime = dnekclock()
+      if(gfirst .eq. 1) then
       if (ifre2) then
         call bin_rd1(ifbswap) ! rank0 will read mesh data + distribute
       else
@@ -107,6 +124,11 @@ c     This is not an excellent place for this check, but will
 c     suffice for now.   5/6/10
       if (ifchar.and.(nelgv.ne.nelgt)) call exitti(
      $ 'ABORT: IFCHAR curr. not supported w/ conj. ht transfer$',nelgv)
+      endif !endif for if gfirst
+
+      call nekgsync()
+      endtime = dnekclock()
+      if(nid .eq. 0) print *, "omit time 2", endtime-starttime
 
       return
       END

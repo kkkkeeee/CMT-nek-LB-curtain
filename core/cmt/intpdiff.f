@@ -27,9 +27,10 @@ C> by nek5000
       m0 = nx1-1
 
       do eq=1,toteq
+         call invcol3(ud,u(1,1,1,eq,e),phig(1,1,1,e),nxyz1)
 
          if (if3d) then
-            call local_grad3(ur,us,ut,u(1,1,1,eq,e),m0,1,dxm1,dxtm1)
+            call local_grad3(ur,us,ut,ud,m0,1,dxm1,dxtm1)
             do i=1,nxyz1
                gradu(i,eq,1) = jacmi(i,e)*(rxm1(i,1,1,e)*ur(i)+
      >                                     sxm1(i,1,1,e)*us(i)+
@@ -48,7 +49,7 @@ C> by nek5000
 
          else
 
-            call local_grad2(ur,us   ,u(1,1,1,eq,e),m0,1,dxm1,dxtm1)
+            call local_grad2(ur,us   ,ud,m0,1,dxm1,dxtm1)
             do i=1,nxyz1
                gradu(i,eq,1) = jacmi(i,e)*(rxm1(i,1,1,e)*ur(i)+
      >                                     sxm1(i,1,1,e)*us(i))
@@ -90,7 +91,6 @@ C> by nek5000
          if (.not.ifgeom.and.ilstep.gt.1) return  ! already computed
          if (ifgeom.and.ilstep.eq.istep)  return  ! already computed
       endif
-c     print *, "came to set_dealias_face"
       ilstep = istep
 
       call zwgl(zptf,wgtf,nxd)

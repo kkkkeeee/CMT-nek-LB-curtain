@@ -273,7 +273,7 @@ c     assign to corresponding processor of gllnid, distributed method
       integer nelt_array_psum(np)
       integer status_mpi(MPI_STATUS_SIZE)
       integer posArray(2, np), npos, nposArray(np), posArrayGlo(2,np)
-      integer preSum_npos, npos_array(np)
+      integer preSum_npos, npos_array(np), posArrayGlo_2(2,np), indexp
 !     posArray store where the element change; for example, if
 !     tempgllnid={0,0,0,1,1,1,2,3,3}, posArray=
 !     (0,1)(1,4)(2,7)(3,8)
@@ -317,7 +317,7 @@ c     Get exclusive prefix sum of nelt, sort it in pnelt
           if(preElem .ne. tempgllnid(i)) then
              npos = npos + 1
              posArray(1,npos) = tempgllnid(i)
-             posArray(2,npos) = i + pnelt !get the local element id
+             posArray(2,npos) = i + pnelt !get the global element id
              preElem = tempgllnid(i)
           endif
       enddo
@@ -329,14 +329,21 @@ c     enddo
 
 c     Get exclusive prefix sum of npos, store it in preSum_npos
 c     npos   1 2 1 1  (npos_array: number of cut/transition points in processors 
-c                       P1, P2, P3, P4) 
+c                       P0, P1, P2, P3) 
 c     preSum_npos 0 1 3 4 
 c     nposArray   0 1 3 4 in every processor (start position of npos in
 c                                             global buffer)
 c     print *, 'pos:', nid, npos
+c     do i=1,npos
+c        print *, 'posArray', nid, i, posArray(1,i)
+c    $      , posArray(2,i)
+c     enddo
+c     do i=1, nelt
+c       print *, "tempgllnid", nid, i, tempgllnid(i), psum(i), threshb
+c     enddo
       npos = 2*npos !*2 because posArray is 2-d array
       preSum_npos = igl_running_sum_ex(npos)
-c     print *, nid, preSum_npos
+c     print *, "preSum_npos", nid, preSum_npos, npos
       call mpi_allgather(preSum_npos, 1, mpi_integer, nposArray
      $    , 1,  MPI_INTEGER, nekcomm, ierr)
 
@@ -348,27 +355,67 @@ c     Gather posArray into posArrayGlo
       call mpi_allgatherv(posArray, npos, mpi_integer, posArrayGlo,
      $   npos_array, nposArray, mpi_integer, nekcomm, ierr)
 
-c     do i=1,np
-c        print *, 'posArrayGlo', nid, i, posArrayGlo(1,i)
-c    $      , posArrayGlo(2,i)
+c     copy posArrayGlo to posArrayGlo_2 is to avoid the suitation like
+c        follows:
+c     posArrayGlo(1,i)  0 2 3 4 5 
+c     posArrayGLO(2,i)  1 2 3 4 7
+c     that porcessor 1 don't have any load, incurring the error in the
+c     limit lelt process.
+      posArrayGlo_2(1,1) = posArrayGlo(1,1)
+      posArrayGlo_2(2,1) = posArrayGlo(2,1)
+      indexp = 1  
+c            if(nid.eq.0) print *, 'posArrayGlo_2', 1,posArrayGlo_2(1,1)
+c    $      , posArrayGlo_2(2,1), posArrayGlo(2,1)    
+      do i =2, np
+         if(posArrayGlo(1, indexp+1) .eq. posArrayGlo_2(1,i-1)+1) then
+            posArrayGlo_2(1,i) = posArrayGlo(1,indexp+1)
+            if(posArrayGlo(2,indexp+1) .le. posArrayGlo_2(2,i-1)) then
+              posArrayGlo_2(2,i) = posArrayGlo_2(2,i-1)+1
+            else
+              posArrayGlo_2(2,i) = posArrayGlo(2,indexp+1)
+            endif    
+              indexp = indexp+1  
+c           if(nid.eq.0) print *, 'posArrayGlo_2', i,posArrayGlo_2(1,i)
+c    $      , posArrayGlo_2(2,i), posArrayGlo(2,i)    
+        else if(posArrayGlo(1,indexp+1).gt.posArrayGlo_2(1,i-1)+1) then
+            posArrayGlo_2(1,i) = posArrayGlo_2(1,i-1)+1
+            posArrayGlo_2(2,i) = posArrayGlo_2(2,i-1)+1
+c           if(nid.eq.0) print *, 'posArrayGlo_2', i,posArrayGlo_2(1,i)
+c    $      , posArrayGlo_2(2,i), posArrayGlo(2,i)    
+             
+         endif  
+      enddo
+
+c     if(nid .eq. 0) then
+c     do i =1,np
+c        print *, "nposArray", nid, i, nposArray(i)
 c     enddo
+c     do i = 1,np
+c       print *, "npos_array", nid, i, npos_array(i)
+c     enddo    
 
-
+c     do i=1,np
+c        print *, 'posArrayGlo_2', nid, i, posArrayGlo_2(1,i)
+c    $      , posArrayGlo_2(2,i)
+c     enddo
+c     endif
 c     limit the number of element in a processor
       do i = 2, np
-         if(posArrayGlo(2,i)-posArrayGlo(2,i-1) .gt. lelt) then
+         if(posArrayGlo_2(2,i)-posArrayGlo_2(2,i-1) .gt. lelt) then
             if(nid .eq. 0)
-     $      print *, 'proc ', i-1, 'exceed lelt, rearranged'
-            posArrayGlo(2,i) = posArrayGlo(2,i-1)+lelt
+     $      print *, 'proc ', i-1, 'first exceed lelt, rearranged'
+     $          , posArrayGlo_2(2,i-1), posArrayGlo_2(2,i)
+            posArrayGlo_2(2,i) = posArrayGlo_2(2,i-1)+lelt
          endif
       enddo
-      if(nelgt+1-posArrayGlo(2,np) .gt. lelt) then
-         posArrayGlo(2,np) = nelgt+1-lelt
+      if(nelgt+1-posArrayGlo_2(2,np) .gt. lelt) then
+         posArrayGlo_2(2,np) = nelgt+1-lelt
          do i=np, 2, -1
-            if(posArrayGlo(2,i)-posArrayGlo(2,i-1) .gt. lelt) then
+            if(posArrayGlo_2(2,i)-posArrayGlo_2(2,i-1) .gt. lelt) then
                if(nid .eq. 0)
-     $           print *, 'proc ', i-1, 'exceed lelt, rearranged'
-               posArrayGlo(2,i-1) = posArrayGlo(2,i)-lelt
+     $           print *, 'proc ', i-1, 'second exceed lelt, rearranged'
+     $             , posArrayGlo_2(2,i-1), posArrayGlo_2(2,i)
+               posArrayGlo_2(2,i-1) = posArrayGlo_2(2,i)-lelt
             else
                exit
             endif
@@ -377,8 +424,8 @@ c     limit the number of element in a processor
 c     print *, 'load of p', i-1, psum(pos(i+1)-1)-psum(pos(i)-1)
 c    $                 ,pos(i), pos(i+1)-1
       do i=1,np-1
-         do j=posArrayGlo(2,i),  posArrayGlo(2,i+1)-1
-            newgllnid(j)=posArrayGlo(1,i)
+         do j=posArrayGlo_2(2,i),  posArrayGlo_2(2,i+1)-1
+            newgllnid(j)=posArrayGlo_2(1,i)
          enddo
       enddo
       do i = j, nelgt
@@ -646,14 +693,21 @@ c    $         endtime
           !call mergePhigArray(newgllnid, trans, trans_n)
           !call mergeUArray(newgllnid)
           !call mergeTlagArray(newgllnid)
-          call mergeArray(phig, lx1*ly1*lz1, lelt, newgllnid, 1)
+          call mergeArray(phig, lx1*ly1*lz1, lelt, newgllnid, 'phig')
 c         print *, 'complete merge phig', nid
-          call mergeArray(u, lx1*ly1*lz1*toteq, lelt, newgllnid, 2)
+          call mergeArray(u, lx1*ly1*lz1*toteq, lelt, newgllnid, 'u')
 c         print *, 'complete merge u', nid
 c         call mergeUArray(newgllnid)
 c         call mergeTlagArray(newgllnid)
           call mergeTlagArray_new(newgllnid)
 c         print *, 'complete merge tlag', nid
+          call mergeArray(xc, 8, lelt, newgllnid, 'xc')
+          call mergeArray(yc, 8, lelt, newgllnid, 'yc')
+          call mergeArray(zc, 8, lelt, newgllnid, 'zc')
+          call mergeArray(curve, 6*12, lelt, newgllnid, 'curve')
+          call mergeArrayC(ccurve, 12, lelt, newgllnid, 'ccurve')
+          call mergeBcArray(newgllnid)
+          call mergeCbcArray(newgllnid)
 
           call icopy(gllnid, newgllnid, nelgt)
               
@@ -816,14 +870,21 @@ c    $                     endtime
 c         call mergePhigArray(newgllnid, trans, trans_n)
 c         call mergePhigArray_new(newgllnid)
 c         call mergeUArray_new(newgllnid)
-          call mergeArray(phig, lx1*ly1*lz1, lelt, newgllnid, 1)
+          call mergeArray(phig, lx1*ly1*lz1, lelt, newgllnid, 'phig')
 c         print *, 'complete merge phig', nid
-          call mergeArray(u, lx1*ly1*lz1*toteq, lelt, newgllnid, 2)
+          call mergeArray(u, lx1*ly1*lz1*toteq, lelt, newgllnid, 'u')
 c         print *, 'complete merge u', nid
 c         call mergeUArray(newgllnid)
 c         call mergeTlagArray(newgllnid)
           call mergeTlagArray_new(newgllnid)
 c         print *, 'complete merge tlag', nid
+          call mergeArray(xc, 8, lelt, newgllnid, 'xc')   
+          call mergeArray(yc, 8, lelt, newgllnid, 'yc')
+          call mergeArray(zc, 8, lelt, newgllnid, 'zc')
+          call mergeArray(curve, 6*12, lelt, newgllnid, 'curve')
+          call mergeArrayC(ccurve, 12, lelt, newgllnid, 'ccurve')  
+          call mergeBcArray(newgllnid) 
+          call mergeCbcArray(newgllnid) 
 
           call icopy(gllnid, newgllnid, nelgt)
 c         print *, 'did icopy', nid
@@ -920,6 +981,74 @@ c     change ipart(je0,i) to global element id
 
        return 
        end 
+
+c------------------------------------------------------
+c subroutine to merge  arrays character
+       subroutine mergeArrayC(arrayName, len1, len2, newgllnid, atype)
+          include 'SIZE'
+          include 'INPUT'
+          include 'PARALLEL'
+          include 'CMTDATA'
+
+          integer newgllnid(lelg), trans(3, lelg), len1, len2
+          character arrayName(len1, len2)
+          character tempArray(len1, len2)
+          logical partl
+          integer nl, sid, eid
+          integer key, nkey, trans_n, nxyz
+c         integer atype
+          character (len=*), intent(in):: atype
+
+          starttime = dnekclock()
+          trans_n=0
+          nxyz = len1
+          nl=0
+          do i=1, nelt
+              trans_n = trans_n +1
+              ieg = lglel(i)
+              if (gllnid(ieg) .eq. nid) then
+                  trans(1, trans_n) = gllnid(ieg)
+                  trans(2, trans_n) = newgllnid(ieg)
+                  trans(3, trans_n) = ieg
+                  do l=1, nxyz
+                     tempArray(l, trans_n) = arrayName(l,i)
+                  enddo
+              endif
+          enddo
+          endtime = dnekclock()
+          if( mod(nid, np/2) .eq. np/2-2) then
+                print *, "Component 1 ", trim(atype), endtime-starttime
+          endif
+c          print *, index_n, trans_n, lelt, nid
+          starttime = dnekclock()
+          key=2
+          call crystal_ctuple_transfer(cr_h, trans_n, nelgt, trans,
+     $                    3, partl, nl, tempArray,nxyz,key)
+c         print *, 'nid: ', nid, 'trans_n', trans_n
+          key=3
+          nkey=1
+          call crystal_ctuple_sort(cr_h, trans_n, trans, 3,
+     $               partl, nl, tempArray, nxyz, key,nkey)
+          endtime = dnekclock()
+          if( mod(nid, np/2) .eq. np/2-2) then
+             print *, "Component 2 ", trim(atype), endtime-starttime
+          endif
+
+          !Update u
+          ! set sid and eid
+          starttime = dnekclock()
+          !copy tempu to u
+              do i=1, trans_n
+                  do l=1, nxyz
+                     arrayName(l,i) = tempArray(l, i)
+                  enddo
+              enddo
+c      print *, "Update u array: u_n", u_n
+          endtime = dnekclock()
+          if( mod(nid, np/2) .eq. np/2-2) then
+             print *, "Component 3 ", trim(atype), endtime-starttime
+          endif
+       end
 c------------------------------------------------------
 c subroutine to merge  arrays
           subroutine mergeArray(arrayName, len1, len2, newgllnid, atype)
@@ -934,7 +1063,8 @@ c subroutine to merge  arrays
           logical partl
           integer nl, sid, eid
           integer key, nkey, trans_n, nxyz
-          integer atype
+c         integer atype
+          character (len=*), intent(in):: atype 
 
           starttime = dnekclock()
           trans_n=0
@@ -954,11 +1084,12 @@ c subroutine to merge  arrays
           enddo
           endtime = dnekclock()
           if( mod(nid, np/2) .eq. np/2-2) then
-             if (atype .eq. 1) then
-                print *, "Component 1b:" , endtime-starttime
-             else
-                print *, "Component 1c:" , endtime-starttime
-             endif 
+c            if (atype .eq. 1) then
+c               print *, "Component 1b:" , endtime-starttime
+c            else
+c               print *, "Component 1c:" , endtime-starttime
+c            endif 
+                print *, "Component 1 " , trim(atype), endtime-starttime
           endif 
 c          print *, index_n, trans_n, lelt, nid
            
@@ -973,11 +1104,7 @@ c         print *, 'nid: ', nid, 'trans_n', trans_n
      $               partl, nl, tempArray, nxyz, key,nkey)
           endtime = dnekclock()
           if( mod(nid, np/2) .eq. np/2-2) then
-             if (atype .eq. 1) then
-                print *, "Component 2b:" , endtime-starttime
-             else
-                print *, "Component 2c:" , endtime-starttime
-             endif 
+             print *, "Component 2 ", trim(atype), endtime-starttime    
           endif
 
           !Update u
@@ -992,12 +1119,7 @@ c         print *, 'nid: ', nid, 'trans_n', trans_n
 c      print *, "Update u array: u_n", u_n
           endtime = dnekclock()
           if( mod(nid, np/2) .eq. np/2-2) then
-             if (atype .eq. 1) then
-                print *, "Component 3b:" , endtime-starttime
-             else
-                print *, "Component 3c:" , endtime-starttime
-             endif 
-          !print *, "nelgt", nelgt, mod(nid, nelgt/2), nelgt/2-2
+             print *, "Component 3 ", trim(atype), endtime-starttime  
           endif
        end
 c------------------------------------------------------
@@ -1534,6 +1656,79 @@ c                 c) received from right neighbor
 c         print *, "Update Phig array: phig_n", phig_n 
           end
 c----------------------------------------------------------------------
+c subroutine to merge CBC arrays
+          subroutine mergeCbcArray(newgllnid)
+          include 'SIZE'
+          include 'INPUT' !cbc is here
+          include 'PARALLEL'
+          include 'CMTDATA'
+c         include 'SOLN'
+
+          integer newgllnid(lelg), trans(3, lelg)
+          character*3 tlagarray(6*(ldimt1+1), lelt)
+          logical partl
+          integer nl, sid, eid
+          integer key, nkey, ifirstelement, ilastelement, u_n, trans_n
+
+          starttime = dnekclock()
+          trans_n=0
+          nxyz = 6*(ldimt1+1)
+          nl=0
+          do i=1, nelt
+              trans_n = trans_n + 1
+              ieg = lglel(i)
+              if (gllnid(ieg) .eq. nid) then
+                  trans(1, trans_n) = gllnid(ieg)
+                  trans(2, trans_n) = newgllnid(ieg)
+                  trans(3, trans_n) = ieg
+                  do l=0, ldimt1
+                  do j=1, 6
+                      ind=j+l*6
+                      tlagarray(ind, trans_n) = cbc(j,i,l)
+                  enddo
+                  enddo
+              endif
+          enddo
+          endtime = dnekclock()
+          if( mod(nid, np/2) .eq. np/2-2) then
+          print *, "Component 1 cbc:" , endtime-starttime
+          endif
+c          print *, index_n, trans_n, lelt, nid
+
+          starttime = dnekclock()
+          key=2
+          call crystal_ctuple_transfer(cr_h, trans_n, nelgt, trans,
+     $                    3, partl, nl, tlagarray,nxyz*3,key)
+c         print *, 'nid: ', nid, 'trans_n', trans_n
+          key=3
+          nkey=1
+          call crystal_ctuple_sort(cr_h, trans_n, trans, 3,
+     $               partl, nl, tlagarray, nxyz*3, key,nkey)
+          endtime = dnekclock()
+          if( mod(nid, np/2) .eq. np/2-2) then
+          print *, "Component 2 cbc:" , endtime-starttime
+          endif
+
+          !Update u
+          ! set sid and eid
+          starttime = dnekclock()
+          !copy tempu to u
+              do i=1, trans_n
+                  do l=0, ldimt1
+                  do j=1, 6
+                     ind=j+l*6
+                     cbc(j,i,l) = tlagarray(ind, i)
+                  enddo
+                  enddo
+              enddo
+c      print *, "Update u array: u_n", u_n
+          endtime = dnekclock()
+          if( mod(nid, np/2) .eq. np/2-2) then
+          print *, "Component 3 cbc:" , endtime-starttime
+          !print *, "nelgt", nelgt, mod(nid, nelgt/2), nelgt/2-2
+          endif
+       end
+c----------------------------------------------------------------------
 c subroutine to merge tlag array
           subroutine mergeTlagArray_new(newgllnid)
           include 'SIZE'
@@ -1628,6 +1823,86 @@ c      print *, "Update u array: u_n", u_n
           endif
        end
 c----------------------------------------------------------------------
+c subroutine to merge BC arrays
+          subroutine mergeBcArray(newgllnid)
+          include 'SIZE'
+          include 'INPUT' !bc is here
+          include 'PARALLEL'
+          include 'CMTDATA'
+c         include 'SOLN'
+
+          integer newgllnid(lelg), trans(3, lelg)
+          real tlagarray(5*6*(ldimt1+1), lelt)
+          logical partl
+          integer nl, sid, eid
+          integer key, nkey, ifirstelement, ilastelement, u_n, trans_n
+
+          starttime = dnekclock()
+          trans_n=0
+          nxyz = 5*6*(ldimt1+1)
+          nl=0
+          do i=1, nelt
+              trans_n = trans_n + 1
+              ieg = lglel(i)
+              if (gllnid(ieg) .eq. nid) then
+c                 procarray(1, index_n) = gllnid(ieg)
+c                 procarray(2, index_n) = newgllnid(ieg)
+c                 procarray(3, index_n) = ieg
+                  trans(1, trans_n) = gllnid(ieg)
+                  trans(2, trans_n) = newgllnid(ieg)
+                  trans(3, trans_n) = ieg
+                  do l=0, ldimt1
+                  do j=1, 6
+                      do k=1, 5
+                          ind=k+(j-1)*5+l*6*5
+                          tlagarray(ind, trans_n) = bc(k,j,i,l)
+                      enddo
+                  enddo
+                  enddo
+              endif
+          enddo
+          endtime = dnekclock()
+          if( mod(nid, np/2) .eq. np/2-2) then
+          print *, "Component 1 bc " , endtime-starttime
+          endif
+c          print *, 'index_n', index_n, trans_n, lelt, nid
+
+          starttime = dnekclock()
+          key=2
+          call crystal_tuple_transfer(cr_h, trans_n, nelgt, trans,
+     $                    3, partl, nl, tlagarray,nxyz,key)
+c         print *, 'nid: ', nid, 'trans_n', trans_n
+          key=3
+          nkey=1
+          call crystal_tuple_sort(cr_h, trans_n, trans, 3,
+     $               partl, nl, tlagarray, nxyz, key,nkey)
+          endtime = dnekclock()
+          if( mod(nid, np/2) .eq. np/2-2) then
+          print *, "Component 2 bc " , endtime-starttime
+          endif
+
+          !Update u
+          ! set sid and eid
+          starttime = dnekclock()
+          !copy tempu to u
+              do i=1, trans_n
+                  do l=0, ldimt1
+                  do j=1, 6
+                      do k=1, 5
+                          ind=k+(j-1)*5+l*6*5
+                          bc(k,j,i,l) = tlagarray(ind, i)
+                      enddo
+                  enddo
+                  enddo
+              enddo
+c      print *, "Update u array: u_n", u_n
+          endtime = dnekclock()
+          if( mod(nid, np/2) .eq. np/2-2) then
+          print *, "Component 3 bc " , endtime-starttime
+          !print *, "nelgt", nelgt, mod(nid, nelgt/2), nelgt/2-2
+          endif
+       end
+c-------------------------------------------------------------------
 c subroutine to merge tlag array
           subroutine mergeTlagArray(newgllnid)
           include 'SIZE'
@@ -1809,13 +2084,13 @@ c
       call nekgsync()          
       starttime = dnekclock()
       etime = dnekclock()
-      call readat
+      call readat_lb
       etims0 = dnekclock_sync()
       if (nio.eq.0) then
          write(6,12) 'called reinitialization'
          write(6,12) 'nelgt/nelgv/lelt:',nelgt,nelgv,lelt
          write(6,12) 'lx1  /lx2  /lx3 :',lx1,lx2,lx3
-         write(6,'(A,g13.5,A,/)')  ' done :: read .rea file ',
+         write(6,'(A,g13.5,A,/)')' done :: read .rea file in readat_lb',
      &                             etims0-etime,' sec'
  12      format(1X,A,4I12,/,/)
       endif
@@ -1823,7 +2098,12 @@ c
       ifsync_ = ifsync
       ifsync = .true.
 
-      call setvar          ! Initialize most variables !skip 
+c     starttime1 = dnekclock_sync() 
+c     call setvar          ! Initialize most variables !skip 
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'setvar ', endtime-starttime1 
+c     endif 
 
 !#ifdef MOAB
 !      if (ifmoab) call nekMOAB_bcs  !   Map BCs
@@ -1833,77 +2113,129 @@ c
       if (nsteps.eq.0 .and. fintim.eq.0.) instep=0
 
       igeom = 2
-      call setup_topo      ! Setup domain topology  
+      starttime1 = dnekclock_sync() 
+      call setup_topo_lb      ! Setup domain topology  
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'setup_topo ', endtime-starttime1 
+c     endif 
+c     starttime1 = dnekclock_sync() 
 
-      call genwz           ! Compute GLL points, weights, etc.
+c     call genwz           ! Compute GLL points, weights, etc.
 
-      call io_init         ! Initalize io unit
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'genwz ', endtime-starttime1 
+c     endif
+c     starttime1 = dnekclock_sync() 
+c     call io_init         ! Initalize io unit
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'io_init ', endtime-starttime1 
+c     endif 
+c     starttime1 = dnekclock_sync() 
 
 !      if (ifcvode.and.nsteps.gt.0)
 !     $   call cv_setsize(0,nfield) !Set size for CVODE solver
 
-      if(nio.eq.0) write(6,*) 'call usrdat'
-      call usrdat
-      if(nio.eq.0) write(6,'(A,/)') ' done :: usrdat'
+c     if(nio.eq.0) write(6,*) 'call usrdat'
+c     call usrdat
+c     if(nio.eq.0) write(6,'(A,/)') ' done :: usrdat'
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'usrdat ', endtime-starttime1 
+c     endif
+      starttime1 = dnekclock_sync() 
 
       call gengeom(igeom)  ! Generate geometry, after usrdat 
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'gengeom ', endtime-starttime1 
+c     endif
+c     starttime1 = dnekclock_sync() 
 
       if (ifmvbd) call setup_mesh_dssum ! Set mesh dssum (needs geom)
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'setup_mesh_dssum ', endtime-starttime1 
+c     endif
+c     starttime1 = dnekclock_sync() 
 
       if(nio.eq.0) write(6,*) 'call usrdat2'
-      call usrdat2
+      call usrdat2_lb
       if(nio.eq.0) write(6,'(A,/)') ' done :: usrdat2'
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'usrdat2_lb ', endtime-starttime1 
+c     endif
 
-      call geom_reset(1)    ! recompute Jacobians, etc.
+c     starttime1 = dnekclock_sync() 
+c     call geom_reset(1)    ! recompute Jacobians, etc.
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'geom_reset ', endtime-starttime1 
+c     endif
 
-      call vrdsmsh          ! verify mesh topology
+c     starttime1 = dnekclock_sync() 
+c     call vrdsmsh          ! verify mesh topology
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'vrdsmsh ', endtime-starttime1 
+c     endif
+c     starttime1 = dnekclock_sync() 
 
 !      call echopar ! echo back the parameter stack
-      call setlog  ! Initalize logical flags
+c     call setlog  ! Initalize logical flags
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'setlog ', endtime-starttime1 
+c     endif
 
-      call bcmask  ! Set BC masks for Dirichlet boundaries.
+c     starttime1 = dnekclock_sync() 
+c     call bcmask  ! Set BC masks for Dirichlet boundaries.
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'bcmash ', endtime-starttime1 
+c     endif 
+c     starttime1 = dnekclock_sync() 
 
-      if (fintim.ne.0.0.or.nsteps.ne.0)
-     $   call geneig(igeom) ! eigvals for tolerances
+c     print *, 'fintim', fintim
+c     if (fintim.ne.0.0.or.nsteps.ne.0)
+c    $   call geneig(igeom) ! eigvals for tolerances
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'geneig ', endtime-starttime1 
+c     endif 
+c     starttime1 = dnekclock_sync() 
 
-      call vrdsmsh     !     Verify mesh topology
+c     call vrdsmsh     !     Verify mesh topology
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'vrdsmsh2 ', endtime-starttime1 
+c     endif 
 
-      call dg_setup    !     Setup DG, if dg flag is set.
+c     starttime1 = dnekclock_sync() 
+c     call dg_setup    !     Setup DG, if dg flag is set.
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'dg_setup ', endtime-starttime1 
+c     endif
+      starttime1 = dnekclock_sync() 
 
-      !starttime = dnekclock() 
-      !if (ifflow.and.(fintim.ne.0.or.nsteps.ne.0)) then    ! Pressure solver 
-         !call estrat                                       ! initialization.
-         !print *, "estrat"
-         !if (iftran.and.solver_type.eq.'itr') then         ! Uses SOLN space 
-            !call set_overlap                               ! as scratch!
-            !print *, "set_overlap"
-         !elseif (solver_type.eq.'fdm'.or.solver_type.eq.'pdm')then
-            !ifemati = .true.
-            !kwave2  = 0.0
-            !if (ifsplit) ifemati = .false.
-            !call gfdm_init(nx2,ny2,nz2,ifemati,kwave2)
-            !print *, "gfdm_init"
-         !elseif (solver_type.eq.'25D') then
-            !call g25d_init
-            !print *, "g25d_init"
-         !endif
-      !endif
-      !endtime = dnekclock()
-      !if( mod(nid, np/2) .eq. np/2-2) then
-          !print *, "pressure solver init", endtime - starttime
-      !endif
 
 !      call init_plugin !     Initialize optional plugin
       if(ifcvode) call cv_setsize
 
-      if(nio.eq.0) write(6,*) 'call usrdat3'
-      call usrdat3
-      if(nio.eq.0) write(6,'(A,/)') ' done :: usrdat3'
 
+      starttime1 = dnekclock_sync() 
 #ifdef CMTNEK
         call nek_cmt_init
         if (nio.eq.0) write(6,*)'Initialized DG machinery'
 #endif
+c     endtime = dnekclock_sync()
+c     if( mod(nid, np/2) .eq. np/2-2) then
+c        print *, 'nek_cmt_init ', endtime-starttime1 
+c     endif
 
       call nekgsync()          
       endtime = dnekclock()

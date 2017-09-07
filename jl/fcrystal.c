@@ -73,10 +73,14 @@
   FORTRAN_NAME(crystal_ituple_sort    ,CRYSTAL_ITUPLE_SORT    )
 #define fcrystal_tuple_sort      \
   FORTRAN_NAME(crystal_tuple_sort     ,CRYSTAL_TUPLE_SORT     )
+#define fcrystal_ctuple_sort      \
+  FORTRAN_NAME(crystal_ctuple_sort     ,CRYSTAL_CTUPLE_SORT     )
 #define fcrystal_ituple_transfer \
   FORTRAN_NAME(crystal_ituple_transfer,CRYSTAL_ITUPLE_TRANSFER)
 #define fcrystal_tuple_transfer  \
   FORTRAN_NAME(crystal_tuple_transfer ,CRYSTAL_TUPLE_TRANSFER )
+#define fcrystal_ctuple_transfer  \
+  FORTRAN_NAME(crystal_ctuple_transfer ,CRYSTAL_CTUPLE_TRANSFER )
 #define fcrystal_free            \
   FORTRAN_NAME(crystal_free           ,CRYSTAL_FREE           )
 
@@ -147,6 +151,34 @@ void fcrystal_tuple_sort(const sint *const handle, const sint *const n,
   if(*md) sarray_permute_buf_(ALIGNOF(double),size_d,Ad,*n, buf);
 }
 
+void fcrystal_ctuple_sort(const sint *const handle, const sint *const n,
+                         sint   Ai[], const sint *const mi,
+                         slong  Al[], const sint *const ml,
+                         char Ad[], const sint *const md,
+                         const sint keys[], const sint *const nkey)
+{
+  const size_t size_i = (*mi)*sizeof(sint),
+               size_l = (*ml)*sizeof(slong),
+               size_d = (*md)*sizeof(char);
+  int init=0;
+  sint nk = *nkey;
+  buffer *buf;
+  CHECK_HANDLE("crystal_ctuple_sort");
+  buf = &handle_array[*handle]->data;
+  if(nk<=0) return;
+  while(--nk>=0) {
+    sint k = keys[nk]-1;
+    if(k<0 || k>=*mi+*ml)
+      fail(1,__FILE__,__LINE__,"crystal_ctuple_sort: invalid key");
+    else if(k<*mi) sortp     (buf,init, (uint *)&Ai[k],    *n,size_i);
+    else           sortp_long(buf,init, (ulong*)&Al[k-*mi],*n,size_l);
+    init=1;
+  }
+  if(*mi) sarray_permute_buf_(ALIGNOF(sint  ),size_i,Ai,*n, buf);
+  if(*ml) sarray_permute_buf_(ALIGNOF(slong ),size_l,Al,*n, buf);
+  if(*md) sarray_permute_buf_(ALIGNOF(char),size_d,Ad,*n, buf);
+}
+
 void fcrystal_ituple_transfer(const sint *handle,
                               sint A[], const sint *m, sint *n,
                               const sint *nmax, const sint *proc_key)
@@ -157,6 +189,27 @@ void fcrystal_ituple_transfer(const sint *handle,
   ar.ptr=A, ar.n=*n, ar.max=*nmax;
   *n = sarray_transfer_many(&ar_ptr,&size,1, 1,0,1,(*proc_key-1)*sizeof(sint),
          (uint*)&A[*proc_key-1],size, handle_array[*handle]);
+}
+
+void fcrystal_ctuple_transfer(
+  const sint *const handle, sint *const n, const sint *const max,
+  sint   Ai[], const sint *const mi,
+  slong  Al[], const sint *const ml,
+  char Ac[], const sint *const mc,
+  const sint *const proc_key)
+{
+  struct array ar_i, ar_l, ar_c, *ar[3];
+  unsigned size[3];
+  CHECK_HANDLE("crystal_ctuple_transfer");
+  size[0]=*mi*sizeof(sint);
+  size[1]=*ml*sizeof(slong);
+  size[2]=*mc*sizeof(char);
+  ar[0]=&ar_i, ar[1]=&ar_l, ar[2]=&ar_c;
+  ar_i.ptr=Ai,ar_l.ptr=Al,ar_c.ptr=Ac;
+  ar_i.n=ar_l.n=ar_c.n = *n;
+  ar_i.max=ar_l.max=ar_c.max=*max;
+  *n = sarray_transfer_many(ar,size,3, 1,0,1,(*proc_key-1)*sizeof(sint),
+         (uint*)&Ai[*proc_key-1],size[0], handle_array[*handle]);
 }
 
 void fcrystal_tuple_transfer(

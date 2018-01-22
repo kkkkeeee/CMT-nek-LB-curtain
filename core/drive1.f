@@ -187,7 +187,7 @@ c-----------------------------------------------------------------------
       integer modstep
       common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
       integer gfirst, inoassignd, resetFindpts, pload
-c     integer reinit_step  !added by keke
+      integer reinit_step  !added by keke
       integer counter !added by keke
       integer last_kstep !added by keke
       real diff_time, diff_time2, reinit_interval
@@ -220,6 +220,11 @@ c     real starttime
 #endif
       call nek_comm_settings(isyc,itime)
       call nek_comm_startstat()
+
+#ifdef PAPI
+      call nek_flops(papi_flops,papi_mflops)
+#endif
+
 
       istep  = 0
       msteps = 1
@@ -267,6 +272,11 @@ c        starttime = DNEKCLOCK()
 
          resetFindpts = 0
          if (lastep .eq. 1) goto 1001
+c        if(kstep .eq. 50) then
+c           call computeRatio
+c           resetFindpts = 1
+c           call reinitialize
+c        endif 
 
          adaptivelb = param(77)
          if(nid .eq. 0) print *, 'adaptivelb', adaptivelb
@@ -275,6 +285,7 @@ c        starttime = DNEKCLOCK()
              modstep = mod(kstep, stepvalue)
              if (modstep .eq. 0) then
                 resetFindpts = 1
+                call computeRatio
                 call reinitialize
                 !call printVerify
              endif
@@ -312,6 +323,7 @@ c           auto load balancing
                    !print *, "into the reinit, nid:", nid, "diff_time:",
      $            !diff_time
                    resetFindpts = 1
+                   call computeRatio
                    call reinitialize
                    !call printVerify
                    reinit_step = kstep
@@ -324,89 +336,11 @@ c           auto load balancing
                endif
             endif
          else if (adaptivelb .eq. 2) then !for the new adaptive lb algorithm
-            if(nid .eq. 0 .and. reinit_step .eq. 0) then
-               if(kstep .le. reinit_step+100) then !for the first 10 step after
-                                            !rebalance, pick the minimum
-                                            !one as the init_time
-                  if((INIT_TIME .gt. TTIME_STP)
-     $                           .and. (TTIME_STP .ne. 0)) then
-                      INIT_TIME = TTIME_STP
-                  endif
-               else if(kstep .gt. reinit_step+100) then
-                  diff_time = (TTIME_STP-INIT_TIME)/INIT_TIME
-                  diff_time2 = TTIME_STP-INIT_TIME
-                  if(nid .eq. 0) then
-                     print *, "nid:", nid, "ttime_stp:", TTIME_STP,
-     $                                INIT_TIME, diff_time
-                  endif
-               endif
-            endif
-
-            call bcast(diff_time, 8)
-            call bcast(diff_time2, 8)
-            if(reinit_step .ne. 0) then
-               if(kstep-reinit_step .eq. 1) then
-                   lb_time=ttime_stp !added by keke for adaptive lb
-                   if(nid .eq. 0) print *,'istep',istep,'reinit_step',
-     :                     reinit_step,'lb_time', lb_time
-                  call bcast(lb_time,8)
-                  rebal=int(sqrt(2*reinit_interval*lb_time/diff_time2))
-                  if(nid .eq. 0) then
-                     print *, 'rebal:', rebal, 'lb_time:',lb_time
-     $                ,'reinit_interval', reinit_interval
-     $                ,'diff_time2', diff_time2,kstep, nid
-                  endif
-               else if(kstep .le. reinit_step+10) then !for the first 10 step after
-                                            !rebalance, pick the minimum
-                                            !one as the init_time
-                  if((INIT_TIME .gt. TTIME_STP)
-     $                           .and. (TTIME_STP .ne. 0)) then
-                      INIT_TIME = TTIME_STP
-                  endif
-               else if(kstep-reinit_step.ge.rebal)then
-                  diff_time2 = TTIME_STP-INIT_TIME
-                  call bcast(diff_time2, 8)
-                  if(diff_time2 .gt. 0) then 
-                     resetFindpts = 1
-                     call reinitialize
-                     reinit_interval = kstep - reinit_step
-                     reinit_step = kstep
-                     INIT_TIME = 100
-                     if(nid .eq. 0) then
-                        print *, "reintilize, reinit_step:", reinit_step
-                     endif
-                  endif
-               endif
-            endif
-            if (diff_time .gt. 0.2 .and. reinit_step .eq. 0) then
-               if (last_kstep .eq. 0) then
-                   counter = counter + 1
-               else if((counter .le. 2) .and.
-     $                     (last_kstep .eq. kstep-1))then
-                   counter = counter + 1
-               else
-                   counter = 0
-               endif
-               last_kstep = kstep
-               if (counter .gt. 2) then 
-                   !print *, "into the reinit, nid:", nid, "diff_time:",
-     $            !diff_time
-                   resetFindpts = 1
-                   call reinitialize
-                   !call printVerify
-                   reinit_interval = kstep - reinit_step
-                   reinit_step = kstep
-                   diff_time = 0
-                   INIT_TIME = 100
-                   counter = 0
-                   if(nid .eq. 0) then
-                      print *, "first reintilize, reinit_step:"
-     $                   , reinit_step
-                   endif
-               endif
-            endif
+            call adaptive_loadbalanceP2(kstep)
          else if (adaptivelb .eq. 3) then
             call adaptive_loadbalance(kstep) 
+         else if (adaptivelb .eq. 4) then
+            call adaptive_loadbalanceP4(kstep) 
          endif 
       enddo
  1001 lastep=1
@@ -435,6 +369,182 @@ c     check for post-processing mode
       END
 
 c-----------------------------------------------------------------------
+      subroutine adaptive_loadbalanceP2(kstep) !slope change
+      include 'SIZE'
+      include 'TSTEP'
+      include 'INPUT'
+      include 'CTIMER'
+      include 'PARALLEL'
+
+      common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
+      integer gfirst, inoassignd, resetFindpts, pload
+
+      real t1_time, timepp, timep, timen, lb_time
+      save t1_time, timepp, timep, timen, lb_time
+      data t1_time / 0.0/, timepp /0.0/, timep/0.0/, timen/0.0/,
+     $ lb_time/0.0/
+      integer reinit_step, last_kstep, rebal, reinit_interval
+      save reinit_step, last_kstep, rebal, reinit_interval 
+      data reinit_step /0/, last_kstep /0/,rebal/1000000/ 
+     $,reinit_interval/100000/
+      real t2_time, diff_time, diff_time2
+
+      if(nid .eq. 0 .and. reinit_step .eq. 0) then
+         if(kstep .gt.3 .and. kstep .lt. 104) then !for the first 100 step after
+                                            !rebalance, pick the average
+                                            !one as the init_time
+            t1_time = t1_time + TTIME_STP
+            if(kstep .eq. 102) timepp = TTIME_STP
+            if(kstep .eq. 103) timep = TTIME_STP
+            print *, 't1_time', t1_time
+         else if(kstep.eq. 104) then
+            t1_time = t1_time + TTIME_STP
+            t1_time = t1_time/101.0 !51.0
+            c1_step = 54 !78 !54
+            timen = TTIME_STP
+         else if(kstep .gt. 104) then
+            timepp = timep
+            timep = timen
+            timen = TTIME_STP
+            if(timepp .gt. timep) then    !get the middle number of
+               if(timep .gt. timen) then  !the 3 step time
+                  t2_time = timep
+               else if(timepp .gt. timen) then
+                  t2_time = timen
+               else  t2_time = timepp
+               endif
+            else
+               if(timep .lt. timen) then
+                  t2_time = timep
+               else if(timepp .gt. timen) then
+                  t2_time =  timepp
+               else
+                  t2_time = timen
+               endif
+            endif
+            print *, 'timepp', timepp, timep, timen, t2_time
+            diff_time = (t2_time-t1_time)/t1_time
+            diff_time2 = t2_time-t1_time
+            if(nid .eq. 0) then
+               print *, "nid:", nid, "ttime_stp:", t2_time,
+     $              t1_time, diff_time
+            endif
+        endif
+      endif
+
+c     if(nid.eq.1.or. nid.eq.0) 
+c    $ print *,'rebal',rebal
+      if(kstep .gt. 104) then
+         if(reinit_step .ne. 0) then
+            if(kstep-reinit_step .eq. 1) then
+               !lb_time=ttime_stp !added by keke for adaptive lb
+               if(nid .eq. 0) print *,'istep',istep,'reinit_step',
+     :            reinit_step,'lb_time', lb_time
+               call bcast(lb_time,8)
+               rebal=int(sqrt(2*reinit_interval*lb_time/diff_time2))
+               if(rebal .le. 104) rebal = 105
+               if(nid .eq. 0) then
+                  print *, 'rebal:', rebal, 'lb_time:',lb_time
+     $            ,'reinit_interval', reinit_interval
+     $            ,'diff_time2', diff_time2,kstep, nid
+               endif
+            else if(kstep.gt.reinit_step+3
+     $              .and.kstep.lt.reinit_step+104) then !for the first 10 step after
+                                            !rebalance, pick the minimum
+                                            !one as the init_time
+               t1_time = t1_time + TTIME_STP
+               if(kstep .eq. reinit_step+102) timepp = TTIME_STP
+               if(kstep .eq. reinit_step+103) timep = TTIME_STP  
+            else if(kstep .eq. reinit_step+104) then
+               t1_time = t1_time + TTIME_STP
+               t1_time = t1_time/101.0
+               c1_step = reinit_step+54
+               timen = TTIME_STP 
+            else if(kstep .gt. reinit_step + 104) then
+               timepp = timep
+               timep = timen
+               timen = TTIME_STP
+               if(timepp .gt. timep) then    !get the middle number of
+                 if(timep .gt. timen) then  !the 3 step time
+                    t2_time = timep
+                 else if(timepp .gt. timen) then
+                    t2_time = timen
+                 else  t2_time = timepp
+                 endif
+               else
+                 if(timep .lt. timen) then
+                    t2_time = timep
+                 else if(timepp .gt. timen) then
+                    t2_time =  timepp
+                 else
+                    t2_time = timen
+                 endif
+               endif 
+
+               diff_time = (t2_time-t1_time)/t1_time
+               diff_time2 = t2_time-t1_time
+               call bcast(diff_time, 8)
+               call bcast(diff_time2, 8)
+               if(nid.eq.0) 
+     $               print *,'diff_time2',diff_time2,t2_time, 
+     $                t1_time, timepp, timep, timen, nid 
+               if(kstep-reinit_step.ge.rebal .or.diff_time .gt. 0.2)then
+                  if(diff_time2 .gt. 0) then 
+                     start_time = dnekclock_sync()
+                     resetFindpts = 1
+                     call computeRatio
+                     call reinitialize
+                     lb_time = dnekclock_sync() - start_time
+                     reinit_interval = kstep - reinit_step !c1_step
+                     reinit_step = kstep
+                     t1_time = 0.0
+                     t2_time = 0.0
+                     if(nid .eq. 0) then
+                        print *, "reintilize, reinit_step:", reinit_step
+                     endif
+                  endif
+               endif
+            endif
+         endif
+         if (reinit_step .eq. 0) then
+            call bcast(diff_time, 8)
+            call bcast(diff_time2, 8)
+            if(diff_time .gt. 0.05) then
+               if (last_kstep .eq. 0) then
+                   counter = counter + 1
+               else if((counter .le. 2) .and.
+     $                     (last_kstep .eq. kstep-1))then
+                   counter = counter + 1
+               else
+                   counter = 0
+               endif
+               last_kstep = kstep
+               if (counter .gt. 2) then 
+                !print *, "into the reinit, nid:", nid, "diff_time:",
+     $            !diff_time
+                   start_time = dnekclock_sync()
+                   resetFindpts = 1
+                   call computeRatio
+                   call reinitialize
+                   lb_time = dnekclock_sync() - start_time
+                   !call printVerify
+                   reinit_interval = kstep - 50 !reinit_step !c1_step !reinit_step
+                   t1_time = 0.0
+                   reinit_step = kstep
+                   diff_time = 0
+                   !INIT_TIME = 100
+                   counter = 0
+                   if(nid .eq. 0) then
+                      print *, "first reintilize, reinit_step:"
+     $                , reinit_step
+                   endif
+               endif
+            endif
+         endif
+      endif 
+      return
+      end
+c------------------------------------------------------------------------------------
       subroutine adaptive_loadbalance(kstep)
       include 'SIZE'
       include 'TSTEP'
@@ -451,36 +561,62 @@ c-----------------------------------------------------------------------
       integer tt, timesLoadBalance, nmax
       real lb_overhead, m, runtime
       real start_time, lb_time2, t2_time
-      real t1_time
-      save t1_time
-      data t1_time / 0.0/
+      real t1_time, timepp, timep, timen
+      save t1_time, timepp, timep, timen
+      data t1_time / 0.0/, timepp /0.0/, timep/0.0/, timen/0.0/
       integer lb_interval
       save lb_interval
       data lb_interval /1000000/ 
 
       if (lb_interval .eq. 1000000 .and. nid .eq. 0) then
-          if (kstep .gt. 3 .and. kstep .lt. 14) then
+          if (kstep .gt. 3 .and. kstep .lt. 104) then
               t1_time = t1_time + TTIME_STP
+              if(kstep .eq. 102) timepp = TTIME_STP
+              if(kstep .eq. 103) timep = TTIME_STP 
           endif  
-          if (kstep .eq. 14) then
-              t1_time = t1_time/10.0
-              c1_step = 7
+          if (kstep .eq. 104) then
+              t1_time = t1_time + TTIME_STP
+              t1_time = t1_time/ 101.0 !51.0 !100.0       
+              c1_step = 54 !78
+              timen = TTIME_STP
           endif  
-          if(kstep .gt. 14) then
-              diff_time = (TTIME_STP-t1_time)/t1_time
-              print *, "nid:", nid, "ttime_stp:", TTIME_STP,
+          if(kstep .gt. 104) then
+              timepp = timep
+              timep = timen 
+              timen = TTIME_STP
+              if(timepp .gt. timep) then    !get the middle number of
+                 if(timep .gt. timen) then  !the 3 step time
+                    t2_time = timep
+                 else if(timepp .gt. timen) then
+                    t2_time = timen
+                 else  t2_time = timepp
+                 endif
+              else
+                 if(timep .lt. timen) then
+                    t2_time = timep
+                 else if(timepp .gt. timen) then
+                    t2_time =  timepp
+                 else
+                    t2_time = timen
+                 endif
+              endif
+              !diff_time = (TTIME_STP-t1_time)/t1_time
+              diff_time = (t2_time-t1_time)/t1_time
+              print *, "nid:", nid, "ttime_stp:", t2_time,
      $                                t1_time, diff_time
           endif
       endif 
 
-      if (lb_interval .eq. 1000000) then
+      if (lb_interval .eq. 1000000 .and. kstep .gt. 104) then
           call bcast(diff_time, 8) 
-          if (diff_time .gt. 0.2) then
+          if (diff_time .gt. 0.05) then
               c2_step = kstep 
-              t2_time = TTIME_STP
+              !t2_time = TTIME_STP
+              call bcast(t2_time, 8)
               m = (t2_time - t1_time) / (c2_step - c1_step)
               start_time = dnekclock()
               resetFindpts = 1
+              call computeRatio
               call reinitialize
               lb_time2 = dnekclock() - start_time
               if (nid .eq. 0) then
@@ -498,19 +634,214 @@ c-----------------------------------------------------------------------
                            exit
                        endif
                    enddo 
-                   lb_interval = tt/timesLoadBalance
+                   if(timesLoadBalance .ne. 0) then !incase
+                                                    !timesLoadBalance =
+                                                    !0
+                      lb_interval = tt/timesLoadBalance
+                   else
+                      lb_interval = 500
+                   endif
               endif
               call bcast(lb_interval, 4) 
               if (nid .eq. 0) then
                   print * , "lb_interval", lb_interval, c2_step
+c                 print * , "lb_time2", lb_time2, t1_time, lb_overhead,
+c    > nmax, tt, timesLoadBalance     
               endif
           endif
       endif
       if (kstep - c2_step .eq. lb_interval) then
           resetFindpts = 1
+          call computeRatio
           call reinitialize
           c2_step = kstep
       endif
+      end
+
+
+c-----------------------------------------------------------------------
+      subroutine adaptive_loadbalanceP4(kstep) !slope change
+      include 'SIZE'
+      include 'TSTEP'
+      include 'INPUT'
+      include 'CTIMER'
+      include 'PARALLEL'
+
+      common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
+      integer gfirst, inoassignd, resetFindpts, pload
+
+      real t1_time, timepp, timep, timen, lb_time, sumtime
+      save t1_time, timepp, timep, timen, lb_time, sumtime
+      data t1_time / 0.0/, timepp /0.0/, timep/0.0/, timen/0.0/,
+     $ lb_time/0.0/, sumtime/0.0/
+      integer reinit_step, last_kstep, rebal, reinit_interval
+      save reinit_step, last_kstep, rebal, reinit_interval 
+      data reinit_step /0/, last_kstep /0/,rebal/1000000/ 
+     $,reinit_interval/100000/
+      real t2_time, diff_time, diff_time2
+
+      if(nid .eq. 0 .and. reinit_step .eq. 0) then
+         if(kstep .gt.3 .and. kstep .lt. 104) then !for the first 100 step after
+                                            !rebalance, pick the average
+                                            !one as the init_time
+            t1_time = t1_time + TTIME_STP
+            if(kstep .eq. 102) timepp = TTIME_STP
+            if(kstep .eq. 103) timep = TTIME_STP
+            print *, 't1_time', t1_time
+         else if(kstep.eq. 104) then
+            t1_time = t1_time + TTIME_STP
+            t1_time = t1_time/ 101.0 !51.0
+            c1_step = 54 !78 !54
+            timen = TTIME_STP
+         else if(kstep .gt. 104) then
+            timepp = timep
+            timep = timen
+            timen = TTIME_STP
+            if(timepp .gt. timep) then    !get the middle number of
+               if(timep .gt. timen) then  !the 3 step time
+                  t2_time = timep
+               else if(timepp .gt. timen) then
+                  t2_time = timen
+               else  t2_time = timepp
+               endif
+            else
+               if(timep .lt. timen) then
+                  t2_time = timep
+               else if(timepp .gt. timen) then
+                  t2_time =  timepp
+               else
+                  t2_time = timen
+               endif
+            endif
+            print *, 'timepp', timepp, timep, timen, t2_time
+            diff_time = (t2_time-t1_time)/t1_time
+            diff_time2 = t2_time-t1_time
+            if(nid .eq. 0) then
+               print *, "nid:", nid, "ttime_stp:", t2_time,
+     $              t1_time, diff_time
+            endif
+        endif
+      endif
+
+c     if(nid.eq.1.or. nid.eq.0) 
+c    $ print *,'rebal',rebal
+      if(kstep .gt. 104) then
+         if(reinit_step .ne. 0) then
+            if(kstep-reinit_step .eq. 1) then
+               !lb_time=ttime_stp !added by keke for adaptive lb
+               if(nid .eq. 0) print *,'istep',istep,'reinit_step',
+     :            reinit_step,'lb_time', lb_time
+               call bcast(lb_time,8)
+               rebal=int(sqrt(2*reinit_interval*lb_time/diff_time2))
+               if(rebal .le. 104) rebal = 105
+               if(nid .eq. 0) then
+                  print *, 'rebal:', rebal, 'lb_time:',lb_time
+     $            ,'reinit_interval', reinit_interval
+     $            ,'diff_time2', diff_time2,kstep, nid
+               endif
+            else if(kstep.gt.reinit_step+3
+     $              .and.kstep.lt.reinit_step+104) then !for the first 10 step after
+                                            !rebalance, pick the minimum
+                                            !one as the init_time
+               t1_time = t1_time + TTIME_STP
+               if(kstep .eq. reinit_step+102) timepp = TTIME_STP
+               if(kstep .eq. reinit_step+103) timep = TTIME_STP  
+            else if(kstep .eq. reinit_step+104) then
+               t1_time = t1_time + TTIME_STP
+               t1_time = t1_time/101.0
+               c1_step = reinit_step+54
+               timen = TTIME_STP 
+            else if(kstep .gt. reinit_step + 104) then
+               timepp = timep
+               timep = timen
+               timen = TTIME_STP
+               if(timepp .gt. timep) then    !get the middle number of
+                 if(timep .gt. timen) then  !the 3 step time
+                    t2_time = timep
+                 else if(timepp .gt. timen) then
+                    t2_time = timen
+                 else  t2_time = timepp
+                 endif
+               else
+                 if(timep .lt. timen) then
+                    t2_time = timep
+                 else if(timepp .gt. timen) then
+                    t2_time =  timepp
+                 else
+                    t2_time = timen
+                 endif
+               endif 
+
+               diff_time = (t2_time-t1_time)/t1_time
+               diff_time2 = t2_time-t1_time
+               if(diff_time2 .gt. 0) then
+                  sumtime = sumtime + (t2_time-t1_time) 
+               endif
+               !call bcast(diff_time, 8)
+               call bcast(diff_time2, 8)
+               call bcast(sumtime, 8)
+               if(nid.eq.0) 
+     $               print *,'sumtime',sumtime,t2_time, 
+     $                t1_time, timepp, timep, timen, nid 
+               if(kstep-reinit_step.ge.rebal .or.sumtime.gt.lb_time)then
+c              if(kstep-reinit_step.ge.rebal)then
+               !if(sumtime.gt.lb_time)then
+                  if(diff_time2 .gt. 0) then 
+                     start_time = dnekclock_sync()
+                     resetFindpts = 1
+                     call computeRatio
+                     call reinitialize
+                     lb_time = dnekclock_sync() - start_time
+                     reinit_interval = kstep - reinit_step !c1_step
+                     if(nid .eq. 0) then
+                        print *, "reintilize, reinit_step:", reinit_step
+     $    ,'previous rebal', rebal,kstep, sumtime, reinit_interval 
+                     endif
+                     reinit_step = kstep
+                     t1_time = 0.0
+                     t2_time = 0.0
+                     sumtime = 0.0
+                  endif
+               endif
+            endif
+         endif
+         if (reinit_step .eq. 0) then
+            call bcast(diff_time, 8)
+            call bcast(diff_time2, 8)
+            if(diff_time .gt. 0.05) then
+               if (last_kstep .eq. 0) then
+                   counter = counter + 1
+               else if((counter .le. 2) .and.
+     $                     (last_kstep .eq. kstep-1))then
+                   counter = counter + 1
+               else
+                   counter = 0
+               endif
+               last_kstep = kstep
+               if (counter .gt. 2) then 
+                !print *, "into the reinit, nid:", nid, "diff_time:",
+     $            !diff_time
+                   start_time = dnekclock_sync()
+                   resetFindpts = 1
+                   call computeRatio
+                   call reinitialize
+                   lb_time = dnekclock_sync() - start_time
+                   !call printVerify
+                   reinit_interval = kstep - 50 !reinit_step !c1_step !reinit_step
+                   t1_time = 0.0
+                   reinit_step = kstep
+                   diff_time = 0
+                   !INIT_TIME = 100
+                   counter = 0
+                   if(nid .eq. 0) then
+                      print *, "first reintilize, reinit_step:"
+     $                , reinit_step
+                   endif
+               endif
+            endif
+         endif
+      endif 
+      return
       end
 c-----------------------------------------------------------------------
       subroutine nek_advance

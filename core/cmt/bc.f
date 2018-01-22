@@ -92,11 +92,12 @@ C> Determining rind state for Dirichlet boundary conditions
             do j=1,nstate
                do i=1,nxz
                   if (abs(wbc(i,f,e,j)) .gt. ntol) then
-                  write(6,*) nid,j,i,wbc(i,f,e,j),wminus(i,f,e,j),cb,
+                  write(6,*)'error',nid,j,i,wbc(i,f,e,j),wminus(i,f,e,j)
+     > ,cb,
      > nstate
                   write(deathmessage,*)  'GS hit a bndy,f,e=',f,e,'$'
 ! Make sure you are not abusing this error handler
-                  call exitti(deathmessage,f)
+                  !call exitti(deathmessage,f)
                   endif
                enddo
             enddo

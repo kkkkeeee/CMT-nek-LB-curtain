@@ -6,6 +6,7 @@ c-----------------------------------------------------------------------
       include 'SCRCT'
       include 'SOLN'
       include 'TSTEP'
+      real starttime, starttime1, endtime
 c
       logical ifverbm
 c
@@ -29,7 +30,16 @@ c     Distributed memory processor mapping
          ENDIF
          call exitt
       ENDIF
+c     endtime = dnekclock_sync()
+c     if(nid.eq.0) print *, "mapelpr before set_proc", endtime-starttime 
+      starttime1 = dnekclock_sync()
       call set_proc_map()
+      endtime = dnekclock_sync()
+      if( mod(nid, np/2) .eq. np/2-2) then
+         print *, 'set_proc_map ', endtime-starttime1
+      endif
+c     if(nid.eq.0) print *, "mapelpr in set_proc", endtime-starttime 
+c     starttime = dnekclock_sync()
 c
       DO 1200 IFIELD=MFIELD,NFLDT
          IF (IFTMSH(IFIELD)) THEN
@@ -40,6 +50,7 @@ c
  1200 CONTINUE
 
 C     Output the processor-element map:
+      starttime1 = dnekclock_sync()
       ifverbm=.true.
       if (np.gt.2050.or.nelgt.gt.40000) ifverbm=.false.
 
@@ -65,6 +76,10 @@ c    &           write(6 ,1315) (lglel(ie,inid+1),ie=9,inelt)
            call crecv(mtype,idum,4)                ! hand-shake
            call csend(mtype,nelt,4,0,0)            ! nelt
         endif
+      endif
+      endtime = dnekclock_sync()
+      if( mod(nid, np/2) .eq. np/2-2) then
+         print *, 'mapelpr_output ', endtime-starttime1
       endif
 
 C     Check elemental distribution
@@ -107,12 +122,14 @@ C
       include 'TSTEP'
       include 'ZPER'
       include 'CMTPART' 
+      include 'mpif.h'
       common /ctmp0/ iwork(lelt)
       REAL*8 dnekclock,t0
  
 c     added by keke
       common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
       integer gfirst, inoassignd, resetFindpts, pload
+      !common /nekmpi/ nid,np,nekcomm,nekgroup,nekreal
 c      parameter (lr=16*ldim,li=5+6)
 c     parameter (lr=76,li=10)
 c     common  /cpartr/ rpart(lr,llpart) ! Minimal value of lr = 14*ndim+1
@@ -126,7 +143,9 @@ c    >                   ,jai,nai,    jr,jd,jx,jy,jz,jv0,ju0,jf0,jfusr
 c    >                   ,jfqs,jfun,jfiu,jtaup,jcd,jdrhodt,jre,jDuDt
 c    >                   ,jtemp,jrho,jrhop,ja,jvol,jdp,jar,jx1,jx2,jx3
 c    >                   ,jv1,jv2,jv3,ju1,ju2,ju3,nar,jvol1,jgam
-
+      real starttime1, endtime
+      integer iwork2(lelg)
+      common /nekmpi/ mid,mp,nekcomm,nekgroup,nekreal
       common /myparth/ i_fp_hndl, i_cr_hndl
       integer ip, e
       logical partl         ! This is a dummy placeholder, used in cr()
@@ -135,13 +154,18 @@ c     end added by keke
 
       t0 = dnekclock()
 c     if (.not.(ifgtp.or.ifgfdm)) then
+c     starttime = dnekclock_sync()
       if (.not.ifgtp) then
 c
 c        rsb element to processor mapping 
 c
          if (ifgfdm)       call gfdm_elm_to_proc(gllnid,np) ! gfdm w/ .map
-
+         starttime1 = dnekclock_sync() 
          call get_map
+         endtime = dnekclock_sync()
+         if( mod(nid, np/2) .eq. np/2-2) then
+         print *, 'get_map ', endtime-starttime1
+         endif
 
       endif
 
@@ -149,6 +173,7 @@ c
 
 c     compute global to local map (no processor info)
 c
+      starttime1 = dnekclock_sync() 
       IEL=0
       CALL IZERO(GLLEL,NELGT)
       DO IEG=1,NELGT
@@ -163,25 +188,52 @@ c        write(6,*) 'map2 ieg:',ieg,nelv,nelt,nelgv,nelgt
 c
 c     dist. global to local map to all processors
 c
-      npass = 1 + nelgt/lelt
-      k=1
-      do ipass = 1,npass
-         m = nelgt - k + 1
-         m = min(m,lelt)
-         if (m.gt.0) call igop(gllel(k),iwork,'+  ',m)
-         k = k+m
-      enddo
+c     endtime = dnekclock_sync()
+c     if(nid.eq.0) print *, "set_proc 1", endtime-starttime 
+
+      ! commented out by keke
+c      npass = 1 + nelgt/lelt
+c      k=1
+c      do ipass = 1,npass
+c         m = nelgt - k + 1
+c         m = min(m,lelt)
+c         if (m.gt.0) call igop(gllel(k),iwork,'+  ',m)
+c         !if (m.gt.0) then
+c         !   call mpi_allreduce (gllel(k),iwork,m,mpi_integer,
+c     >   !          mpi_sum ,nekcomm,ierr)
+c         !   call icopy(gllel(k),iwork,m)
+c         !endif 
+cc        endtime = dnekclock_sync()
+cc        if(nid.eq.0) print *, "set_proc 2", endtime-starttime, ipass, 
+cc    >      istep  
+c         k = k+m
+c      enddo
+
+            call mpi_allreduce (gllel(1),iwork2,nelgt,mpi_integer,
+     >             mpi_sum ,nekcomm,ierr)
+            call icopy(gllel(1),iwork2,nelgt)
+      endtime = dnekclock_sync()
+      if( mod(nid, np/2) .eq. np/2-2) then
+      print *, 'gllel_comp ', endtime-starttime1
+      endif
 c
 c     compute local to global map
 c     (i.e. returns global element number given local index and proc id)
 c
+c     starttime = dnekclock_sync()
+      starttime1 = dnekclock_sync() 
       do ieg=1,nelgt
          mid  =gllnid(ieg)
          ie   =gllel (ieg)
          if (mid.eq.nid) lglel(ie)=ieg
       enddo
+      endtime = dnekclock_sync()
+      if( mod(nid, np/2) .eq. np/2-2) then
+      print *, 'lglel_comp ', endtime-starttime1
+      endif
 
 c     added by keke to convert ipart(je0, i) to local element id
+      starttime1 = dnekclock_sync() 
       if ( gfirst .eq. 0) then
          ip=0
          do ip = 1, n
@@ -192,7 +244,14 @@ c     Sort by element number
           call crystal_tuple_sort(i_cr_hndl,n
      $              , ipart,ni,partl,nl,rpart,nr,je0,1)
       endif
+      endtime = dnekclock_sync()
+      if( mod(nid, np/2) .eq. np/2-2) then
+      print *, 'part_sort ', endtime-starttime1
+      endif
 
+c     endtime = dnekclock_sync()
+c     if(nid.eq.0) print *, "set_proc 3", endtime-starttime 
+c     starttime = dnekclock_sync()
 c
 c     All Done.
 c

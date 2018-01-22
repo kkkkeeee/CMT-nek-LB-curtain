@@ -41,9 +41,9 @@ c
       logical ifprnt,if_full_pres,ifoutfld
       common /tstep4/ ifprnt,if_full_pres,ifoutfld
       
-      COMMON /TTIME/ TTIME_STP, INIT_TIME, lb_time, reinit_step !added by keke to determine when to load balance
-      real TTIME_STP, INIT_TIME, lb_time
-      integer reinit_step
+      COMMON /TTIME/ TTIME_STP, INIT_TIME!, lb_time, reinit_step !added by keke to determine when to load balance
+      real TTIME_STP, INIT_TIME!, lb_time
+      !integer reinit_step
 
 
       real lyap(3,lpert)

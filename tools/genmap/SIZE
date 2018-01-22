@@ -1,5 +1,5 @@
        ! max number of elements
-       parameter(lelm=800 000) 
+       parameter(lelm=900 000) 
 c      parameter(lelm=2 000 000)
 
        common/percsn/wdsize,wdsizi

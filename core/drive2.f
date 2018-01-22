@@ -127,7 +127,7 @@ C
          TTIME     = EETIME2-EETIME0   ! sum of all timesteps
          IF(ISTEP.EQ.1) THEN
            TTIME_STP = 0
-           INIT_TIME = 100  !added by keke to store the first time step
+           !INIT_TIME = 100  !added by keke to store the first time step
                           !after rebalance
            TTIME     = 0
          ENDIF

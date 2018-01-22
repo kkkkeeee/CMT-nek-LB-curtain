@@ -113,7 +113,7 @@ c
 
       if (ifdoin) then
          call prepost_map(0) ! map pr and axisymm. arrays
-         call outfld(prefix)
+c        call outfld(prefix)
          call prepost_map(1) ! map back axisymm. arrays
       endif
 

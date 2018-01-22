@@ -49,6 +49,7 @@ c------------------------------------------------------------------------
       ifsip=.false.
       gasmodel = 1
 ! JH080714 Now with parameter space to sweep through
+      starttime1 = dnekclock_sync()
       open(unit=81,file="riemann.inp",form="formatted")
       read (81,*) domlen
       read (81,*) xdiaph
@@ -62,24 +63,28 @@ c------------------------------------------------------------------------
       read (81,*) zerotime
       close(81)
 
-      molmass=8314.3
-      muref=0.0
-      coeflambda=-2.0/3.0
-      suthcoef=1.0
-      prlam = 0.72
-      rgasref    = MixtPerf_R_M(molmass,dum)
-      cvgref     = rgasref/(gmaref-1.0)
-      cpgref     = MixtPerf_Cp_CvR(cvgref,rgasref)
-      gmaref     = MixtPerf_G_CpR(cpgref,rgasref)
+!     molmass=8314.3
+!     muref=0.0
+!     coeflambda=-2.0/3.0
+!     suthcoef=1.0
+!     prlam = 0.72
+!      rgasref    = MixtPerf_R_M(molmass,dum)
+!      cvgref     = rgasref/(gmaref-1.0)
+!      cpgref     = MixtPerf_Cp_CvR(cvgref,rgasref)
+!      gmaref     = MixtPerf_G_CpR(cpgref,rgasref)
 
       c_max=0.5     ! should be 0.5, really
       c_sub_e=1.0e36
+      endtime = dnekclock_sync()
+      if( mod(nid, np/2) .eq. np/2-2) then
+         print *, 'usrdat2_check ', endtime-starttime1
+      endif
 
-      call e1rpex(domlen,xdiaph,gmaref,dleft,uleft,pleft,dright,uright,
-     >            pright,1.0)
+!      call e1rpex(domlen,xdiaph,gmaref,dleft,uleft,pleft,dright,uright,
+!     >            pright,1.0)
 c     CALL SAMPLE(PMstar, UM, 0.0, rhohere, uhere, pinfty)
-      reftemp=pleft/dleft/rgasref
-      aleft=sqrt(gmaref*pleft/dleft)
+!      reftemp=pleft/dleft/rgasref
+!      aleft=sqrt(gmaref*pleft/dleft)
 c     call domain_size(xmin,xmax,ymin,ymax,zmin,zmax)
 c     if(nio.eq.0)then
 c        write(6,*) 'domlen',domlen

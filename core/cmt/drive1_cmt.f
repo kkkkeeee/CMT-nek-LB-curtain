@@ -23,6 +23,7 @@ c     Solve the Euler equations
       
       integer e,eq
       character*32 dumchars
+      real time_taken, starttime, endtime
 
       ftime_dum = dnekclock()
       nxyz1=lx1*ly1*lz1
@@ -46,6 +47,7 @@ c preprocessing of interpolation step
 
       endif
 
+      time_taken = 0
       nstage = 3
       do stage=1,nstage
          if (stage.eq.1) call copy(res3(1,1,1,1,1),U(1,1,1,1,1),n)
@@ -57,7 +59,10 @@ c particle equations of motion are solved (also includes forcing)
 c In future this subroutine may compute the back effect of particles
 c on the fluid and suitably modify the residue computed by 
 c compute_rhs_dt for the 5 conserved variables
+         starttime = dnekclock_sync()  
          call usr_particles_solver
+         endtime = dnekclock_sync() 
+         time_taken = time_taken + (endtime-starttime)
 
 ! JH111815 soon....
 ! JH082316 someday...maybe?
@@ -86,16 +91,18 @@ c-----------------------------------------------------------------------
          enddo
       enddo
 
+      if(nid .eq. 0) print *, "time taken by particle_solver",
+     >       time_taken
       call compute_primitive_vars ! for next time step? Not sure anymore
       call copy(t(1,1,1,1,2),vtrans(1,1,1,1,irho),nxyz1*nelt)
       ftime = ftime + dnekclock() - ftime_dum
 
-      if (mod(istep,iostep).eq.0.or.istep.eq.1)then
-         call out_fld_nek
-         call mass_balance(if3d)
+c      if (mod(istep,iostep).eq.0.or.istep.eq.1)then
+c         call out_fld_nek
+c         call mass_balance(if3d)
 c dump out particle information. 
-         call usr_particles_io(istep)
-      end if
+c        call usr_particles_io(istep)
+c      end if
 
 !     call print_cmt_timers ! NOT NOW
 

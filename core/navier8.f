@@ -1782,7 +1782,7 @@ c-----------------------------------------------------------------------
       character*1   mapfle1(132)
       equivalence  (mapfle,mapfle1)
 
-      starttime = dnekclock()
+      starttime = dnekclock_sync()
       if (gfirst .eq. 1) then
       iok = 0
       if (nid.eq.0) then
@@ -1858,6 +1858,10 @@ c-----------------------------------------------------------------------
               ntuple = 0
           endif
       endif
+      endtime = dnekclock_sync()
+      if( mod(nid, np/2) .eq. np/2-2) then
+         print *, 'copy_wk ', endtime-starttime
+      endif
 
 c     Distribute and assign partitions
       if (.not.ifgfdm) then             ! gllnid is already assigned for gfdm
@@ -1870,14 +1874,22 @@ c     Distribute and assign partitions
             call bcast(gllnid,lng)
 c           call assign_gllnid(gllnid,gllel,nelgt,nelgv,np) ! gllel is used as scratch
          else
+            starttime = dnekclock_sync()
             distrib = param(80)
             if (distrib.eq.1) then
                 call recompute_partitions_distr   !keke add, distributed load balance
+            else if (distrib.eq.2) then
+                call recompute_partitions_hybrid
             else
                 call recompute_partitions   !keke add, assign gllnid according to the elements load balance, gllnid has obtained within this function
             endif
             lng = isize*neli
             call bcast(pload,lng)
+            endtime = dnekclock_sync()
+            if( mod(nid, np/2) .eq. np/2-2) then
+               print *, 'recompute_partitions ', endtime-starttime,
+     $    'distrib', distrib
+            endif
         endif
 
 c       if(nid.eq.0) then

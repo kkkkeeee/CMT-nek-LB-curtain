@@ -6,6 +6,7 @@ S=
 SCMT=
 J=
 OPT_INCDIR=./
+OPT_INCDIR += -I /usr/local/tools/papi/include
 OBJDIR=obj
 IFMPI= 
 IFCMT= 
@@ -44,7 +45,7 @@ byte.o chelpers.o byte_mpi.o postpro.o \
 cvode_driver.o nek_comm.o \
 vprops.o makeq_aux.o \
 papi.o nek_in_situ.o \
-readat_new.o reader_re2.o finiparser.o iniparser.o dictionary.o
+readat_new.o reader_re2.o finiparser.o iniparser.o dictionary.o  artvisc.o
 ################################################################################
 # MXM 
 MXM =  
@@ -138,7 +139,7 @@ objdir:
 
 nek5000:	objdir $(NOBJS)
 	$(FC) -c $(FL2) $(CASEDIR)/${CASENAME}.f $(VISITNEK_INCLUDES) -o ${OBJDIR}/${CASENAME}.o 
-	$(FC) -o ${BINNAME} ${OBJDIR}/${CASENAME}.o $(NOBJS) $(LDFLAGS)
+	$(FC) -o ${BINNAME} ${OBJDIR}/${CASENAME}.o $(NOBJS) $(LDFLAGS) -L/usr/local/tools/papi/lib -l papi
 	@if test -f ${BINNAME}; then \
         echo ""; \
 	echo "#############################################################"; \
@@ -235,6 +236,7 @@ $(OBJDIR)/reader_re2.o	:$S/reader_re2.f;		$(FC) -c $(FL2) $< -o $@
 # CMT CORE     ##################################################################
 $(OBJDIR)/step.o	:$(SCMT)/step.f;        	$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/drive1_cmt.o	:$(SCMT)/drive1_cmt.f;		$(FC) -c $(FL2) $< -o $@
+$(OBJDIR)/artvisc.o	:$(SCMT)/artvisc.f;		$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/drive2_cmt.o	:$(SCMT)/drive2_cmt.f;		$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/driver3_cmt.o	:$(SCMT)/driver3_cmt.f;		$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/gradient_solver.o	:$(SCMT)/gradient_solver.f;		$(FC) -c $(FL2) $< -o $@

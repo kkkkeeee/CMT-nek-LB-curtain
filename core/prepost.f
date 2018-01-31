@@ -860,6 +860,11 @@ c-----------------------------------------------------------------------
       nxo  = nx1
       nyo  = ny1
       nzo  = nz1
+      !added by keke
+      nn = nelt
+      nelB = igl_running_sum(nn)
+      nelB = nelB - nelt
+      !end added by keke
       if (ifreguo) then ! dump on regular (uniform) mesh
          if (nrg.gt.lxo) then
             if (nid.eq.0) write(6,*) 

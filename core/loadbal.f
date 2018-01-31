@@ -2084,7 +2084,6 @@ c                 procarray(3, index_n) = ieg
           if( mod(nid, np/2) .eq. np/2-2) then
           print *, "Component 1a:" , endtime-starttime
           endif 
-c          print *, index_n, trans_n, lelt, nid
            
           starttime = dnekclock()
           key=2
